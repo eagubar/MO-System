@@ -1,0 +1,796 @@
+Extensión MO-capture para Análisis de Configuraciones
+Vamos a crear un módulo que se integre con MO-capture para analizar archivos .conf y generar templates JSON estructurados.
+
+1. Módulo de Análisis de Configuraciones para MO-capture
+bash
+# Crear el módulo de análisis de configuraciones
+cat > /usr/local/lib/MO-capture/config-analyzer.py << 'EOF'
+#!/usr/bin/env python3
+"""
+MO-capture Config Analyzer
+Analiza archivos de configuración y genera templates estructurados
+"""
+
+import os
+import json
+import re
+import yaml
+import configparser
+from pathlib import Path
+from datetime import datetime
+
+class MOConfigAnalyzer:
+    def __init__(self):
+        self.supported_formats = {
+            '.conf': self.parse_conf_file,
+            '.cfg': self.parse_conf_file,
+            '.ini': self.parse_ini_file,
+            '.yaml': self.parse_yaml_file,
+            '.yml': self.parse_yaml_file,
+            '.json': self.parse_json_file,
+            '.xml': self.parse_xml_file,
+            '.properties': self.parse_properties_file
+        }
+        
+    def analyze_config_file(self, file_path):
+        """Analiza un archivo de configuración y devuelve su estructura"""
+        file_path = Path(file_path)
+        
+        if not file_path.exists() or not file_path.is_file():
+            return {"error": "File not found"}
+        
+        # Determinar el parser basado en la extensión
+        file_ext = file_path.suffix.lower()
+        parser = self.supported_formats.get(file_ext, self.parse_generic_file)
+        
+        try:
+            config_data = parser(file_path)
+            return self.create_config_template(file_path, config_data)
+        except Exception as e:
+            return {"error": f"Analysis failed: {str(e)}"}
+    
+    def parse_conf_file(self, file_path):
+        """Parsea archivos .conf estilo Linux"""
+        config_data = {
+            "sections": {},
+            "comments": [],
+            "directives": []
+        }
+        
+        current_section = "global"
+        config_data["sections"][current_section] = {}
+        
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            lines = f.readlines()
+        
+        for line_num, line in enumerate(lines, 1):
+            line = line.strip()
+            
+            # Línea vacía
+            if not line:
+                continue
+            
+            # Comentarios
+            if line.startswith('#') or line.startswith(';'):
+                config_data["comments"].append({
+                    "line": line_num,
+                    "content": line
+                })
+                continue
+            
+            # Secciones [section]
+            section_match = re.match(r'^\s*\[\s*([^\]]+)\s*\]\s*$', line)
+            if section_match:
+                current_section = section_match.group(1).strip()
+                config_data["sections"][current_section] = {}
+                continue
+            
+            # Directivas clave=valor
+            directive_match = re.match(r'^\s*([^#=]+?)\s*=\s*(.*?)\s*$', line)
+            if directive_match:
+                key = directive_match.group(1).strip()
+                value = directive_match.group(2).strip()
+                
+                # Limpiar comentarios al final de la línea
+                value = re.sub(r'\s*[#;].*$', '', value)
+                
+                config_data["sections"][current_section][key] = {
+                    "value": value,
+                    "line": line_num,
+                    "original_line": line
+                }
+                config_data["directives"].append({
+                    "section": current_section,
+                    "key": key,
+                    "value": value,
+                    "line": line_num
+                })
+        
+        return config_data
+    
+    def parse_ini_file(self, file_path):
+        """Parsea archivos INI"""
+        config_data = {
+            "sections": {},
+            "comments": []
+        }
+        
+        try:
+            config = configparser.ConfigParser()
+            config.read(file_path)
+            
+            for section in config.sections():
+                config_data["sections"][section] = {}
+                for key, value in config.items(section):
+                    config_data["sections"][section][key] = {
+                        "value": value,
+                        "line": "unknown",  # configparser no guarda números de línea
+                        "original_line": f"{key} = {value}"
+                    }
+        except Exception as e:
+            config_data["error"] = f"INI parsing failed: {str(e)}"
+        
+        return config_data
+    
+    def parse_yaml_file(self, file_path):
+        """Parsea archivos YAML"""
+        config_data = {
+            "sections": {"root": {}},
+            "format": "yaml"
+        }
+        
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                yaml_data = yaml.safe_load(f)
+            
+            if yaml_data:
+                config_data["sections"]["root"] = self._flatten_yaml_data(yaml_data)
+        except Exception as e:
+            config_data["error"] = f"YAML parsing failed: {str(e)}"
+        
+        return config_data
+    
+    def parse_json_file(self, file_path):
+        """Parsea archivos JSON"""
+        config_data = {
+            "sections": {"root": {}},
+            "format": "json"
+        }
+        
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                json_data = json.load(f)
+            
+            if json_data:
+                config_data["sections"]["root"] = self._flatten_json_data(json_data)
+        except Exception as e:
+            config_data["error"] = f"JSON parsing failed: {str(e)}"
+        
+        return config_data
+    
+    def parse_xml_file(self, file_path):
+        """Parsea archivos XML básicos"""
+        config_data = {
+            "sections": {"root": {}},
+            "format": "xml",
+            "warning": "XML parsing is basic, consider using specialized tools"
+        }
+        
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # Extraer elementos básicos (implementación simple)
+            elements = re.findall(r'<(\w+)(?:\s+[^>]*)?>([^<]*)</\1>', content)
+            for tag, value in elements:
+                if value.strip():
+                    config_data["sections"]["root"][tag] = {
+                        "value": value.strip(),
+                        "type": "xml_element"
+                    }
+        except Exception as e:
+            config_data["error"] = f"XML parsing failed: {str(e)}"
+        
+        return config_data
+    
+    def parse_properties_file(self, file_path):
+        """Parsea archivos .properties de Java"""
+        config_data = {
+            "sections": {"global": {}},
+            "format": "properties"
+        }
+        
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+            
+            for line_num, line in enumerate(lines, 1):
+                line = line.strip()
+                
+                if not line or line.startswith('#'):
+                    continue
+                
+                if '=' in line:
+                    key, value = line.split('=', 1)
+                    config_data["sections"]["global"][key.strip()] = {
+                        "value": value.strip(),
+                        "line": line_num
+                    }
+        except Exception as e:
+            config_data["error"] = f"Properties parsing failed: {str(e)}"
+        
+        return config_data
+    
+    def parse_generic_file(self, file_path):
+        """Parsea archivos genéricos de texto"""
+        config_data = {
+            "sections": {"content": {}},
+            "format": "generic"
+        }
+        
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                lines = f.readlines()
+            
+            for line_num, line in enumerate(lines, 1):
+                config_data["sections"]["content"][f"line_{line_num}"] = {
+                    "value": line.rstrip('\n'),
+                    "line": line_num
+                }
+        except Exception as e:
+            config_data["error"] = f"Generic parsing failed: {str(e)}"
+        
+        return config_data
+    
+    def _flatten_yaml_data(self, data, parent_key='', sep='.'):
+        """Aplana datos YAML para una estructura más simple"""
+        items = {}
+        if isinstance(data, dict):
+            for k, v in data.items():
+                new_key = f"{parent_key}{sep}{k}" if parent_key else k
+                if isinstance(v, dict):
+                    items.update(self._flatten_yaml_data(v, new_key, sep=sep))
+                elif isinstance(v, list):
+                    for i, item in enumerate(v):
+                        items[f"{new_key}[{i}]"] = {
+                            "value": str(item),
+                            "type": type(item).__name__
+                        }
+                else:
+                    items[new_key] = {
+                        "value": str(v),
+                        "type": type(v).__name__
+                    }
+        return items
+    
+    def _flatten_json_data(self, data, parent_key='', sep='.'):
+        """Aplana datos JSON para una estructura más simple"""
+        return self._flatten_yaml_data(data, parent_key, sep)
+    
+    def create_config_template(self, file_path, config_data):
+        """Crea un template MO estructurado del archivo de configuración"""
+        file_stat = file_path.stat()
+        
+        template = {
+            "MO_config_template": {
+                "version": "1.0",
+                "file_path": str(file_path),
+                "file_size": file_stat.st_size,
+                "file_permissions": oct(file_stat.st_mode)[-3:],
+                "analysis_timestamp": datetime.now().isoformat(),
+                "analyzer": "MO-config-analyzer"
+            },
+            "file_info": {
+                "name": file_path.name,
+                "extension": file_path.suffix,
+                "absolute_path": str(file_path.absolute()),
+                "parent_directory": str(file_path.parent)
+            },
+            "config_structure": config_data,
+            "summary": {
+                "total_sections": len(config_data.get("sections", {})),
+                "total_parameters": sum(
+                    len(params) for params in config_data.get("sections", {}).values()
+                ),
+                "total_comments": len(config_data.get("comments", [])),
+                "format": config_data.get("format", "unknown")
+            }
+        }
+        
+        return template
+
+def main():
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="MO-capture Config Analyzer")
+    parser.add_argument("config_file", help="Configuration file to analyze")
+    parser.add_argument("--output", "-o", help="Output JSON file")
+    
+    args = parser.parse_args()
+    
+    analyzer = MOConfigAnalyzer()
+    result = analyzer.analyze_config_file(args.config_file)
+    
+    if args.output:
+        with open(args.output, 'w') as f:
+            json.dump(result, f, indent=2, ensure_ascii=False)
+        print(f"Configuration analysis saved to: {args.output}")
+    else:
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+
+if __name__ == "__main__":
+    main()
+EOF
+2. Integración con MO-capture
+bash
+# Crear script que integre el análisis de configuraciones con MO-capture
+cat > /usr/local/bin/MO-analyze-config << 'EOF'
+#!/bin/bash
+# MO-analyze-config - Analiza archivos de configuración y genera templates MO
+
+CONFIG_ANALYZER="/usr/local/lib/MO-capture/config-analyzer.py"
+LOG_FILE="/var/log/MO-capture.log"
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] MO-analyze-config: $1" | tee -a "$LOG_FILE"
+}
+
+show_help() {
+    echo "MO-analyze-config - Analiza archivos de configuración para MO-capture"
+    echo ""
+    echo "Uso: MO-analyze-config <archivo.conf> [opciones]"
+    echo "     MO-analyze-config --batch <directorio>"
+    echo "     MO-analyze-config --integrate-with <template.json>"
+    echo ""
+    echo "Opciones:"
+    echo "  --output, -o <file>     Archivo de salida JSON"
+    echo "  --batch <dir>           Analiza todos los archivos de configuración en el directorio"
+    echo "  --integrate-with <tpl>  Integra análisis con template MO-capture existente"
+    echo "  --help                  Muestra esta ayuda"
+    echo ""
+    echo "Ejemplos:"
+    echo "  MO-analyze-config /etc/nginx/nginx.conf"
+    echo "  MO-analyze-config --batch /etc/nginx/conf.d/"
+    echo "  MO-analyze-config --integrate-with /var/lib/MO-capture/templates/MO-template-*.json"
+}
+
+analyze_single_file() {
+    local config_file="$1"
+    local output_file="$2"
+    
+    if [[ ! -f "$config_file" ]]; then
+        log "ERROR: Archivo no encontrado: $config_file"
+        return 1
+    fi
+    
+    log "Analizando archivo de configuración: $config_file"
+    
+    if [[ -z "$output_file" ]]; then
+        output_file="/var/lib/MO-capture/config-analysis/$(basename "$config_file").json"
+    fi
+    
+    # Crear directorio de salida si no existe
+    mkdir -p "$(dirname "$output_file")"
+    
+    # Ejecutar analizador Python
+    python3 "$CONFIG_ANALYZER" "$config_file" --output "$output_file"
+    
+    if [[ $? -eq 0 ]]; then
+        log "Análisis completado: $output_file"
+        echo "✓ Config analysis: $output_file"
+    else
+        log "ERROR en análisis: $config_file"
+        return 1
+    fi
+}
+
+analyze_batch() {
+    local directory="$1"
+    
+    if [[ ! -d "$directory" ]]; then
+        log "ERROR: Directorio no encontrado: $directory"
+        return 1
+    fi
+    
+    log "Analizando directorio: $directory"
+    
+    # Encontrar archivos de configuración comunes
+    local config_files=()
+    config_files+=($(find "$directory" -name "*.conf" -type f))
+    config_files+=($(find "$directory" -name "*.cfg" -type f))
+    config_files+=($(find "$directory" -name "*.ini" -type f))
+    config_files+=($(find "$directory" -name "*.yaml" -type f))
+    config_files+=($(find "$directory" -name "*.yml" -type f))
+    config_files+=($(find "$directory" -name "*.json" -type f))
+    
+    if [[ ${#config_files[@]} -eq 0 ]]; then
+        echo "No se encontraron archivos de configuración en: $directory"
+        return 0
+    fi
+    
+    echo "Encontrados ${#config_files[@]} archivos de configuración"
+    
+    local success_count=0
+    for config_file in "${config_files[@]}"; do
+        if analyze_single_file "$config_file"; then
+            ((success_count++))
+        fi
+    done
+    
+    echo "✓ Análisis completado: $success_count/${#config_files[@]} archivos procesados"
+    log "Batch analysis completed: $success_count files processed"
+}
+
+integrate_with_template() {
+    local template_file="$1"
+    
+    if [[ ! -f "$template_file" ]]; then
+        log "ERROR: Template no encontrado: $template_file"
+        return 1
+    fi
+    
+    log "Integrando análisis de configuraciones con template: $template_file"
+    
+    # Crear directorio temporal
+    local temp_dir=$(mktemp -d)
+    local integrated_template="${template_file%.json}.with-configs.json"
+    
+    # Extraer información de archivos del template
+    if command -v jq >/dev/null 2>&1; then
+        # Obtener lista de archivos creados
+        local files_created=$(jq -r '.operations.files_created[]?.path // empty' "$template_file")
+        
+        # Analizar cada archivo de configuración
+        local config_analyses=()
+        for file in $files_created; do
+            if [[ -f "$file" ]] && [[ "$file" == *".conf" || "$file" == *".cfg" || "$file" == *".ini" ]]; then
+                local analysis_file="$temp_dir/$(basename "$file").analysis.json"
+                if analyze_single_file "$file" "$analysis_file" >/dev/null 2>&1; then
+                    config_analyses+=("$analysis_file")
+                fi
+            fi
+        done
+        
+        # Integrar análisis en el template
+        if [[ ${#config_analyses[@]} -gt 0 ]]; then
+            # Leer template original
+            local template_data=$(jq '.' "$template_file")
+            
+            # Agregar análisis de configuraciones
+            for analysis_file in "${config_analyses[@]}"; do
+                local analysis_data=$(jq '.' "$analysis_file")
+                local config_path=$(jq -r '.file_info.absolute_path' "$analysis_file")
+                template_data=$(jq --arg path "$config_path" --argjson analysis "$analysis_data" \
+                    '.config_analyses[$path] = $analysis' <<< "$template_data")
+            done
+            
+            # Guardar template integrado
+            echo "$template_data" > "$integrated_template"
+            log "Template integrado creado: $integrated_template"
+            echo "✓ Integrated template: $integrated_template"
+        else
+            echo "No se encontraron archivos de configuración para integrar"
+        fi
+        
+    else
+        echo "Error: jq no está instalado. No se puede integrar con templates."
+        return 1
+    fi
+    
+    # Limpiar
+    rm -rf "$temp_dir"
+}
+
+# Manejo de argumentos
+case "${1:-}" in
+    "--help"|"-h")
+        show_help
+        ;;
+    "--batch")
+        if [[ -n "$2" ]]; then
+            analyze_batch "$2"
+        else
+            echo "Error: Se requiere directorio para --batch"
+            exit 1
+        fi
+        ;;
+    "--integrate-with")
+        if [[ -n "$2" ]]; then
+            integrate_with_template "$2"
+        else
+            echo "Error: Se requiere archivo template para --integrate-with"
+            exit 1
+        fi
+        ;;
+    "--output"|"-o")
+        if [[ -n "$2" && -n "$3" ]]; then
+            analyze_single_file "$2" "$3"
+        else
+            echo "Error: Se requiere archivo de entrada y salida"
+            exit 1
+        fi
+        ;;
+    "")
+        echo "Error: Se requiere archivo de configuración"
+        show_help
+        exit 1
+        ;;
+    *)
+        analyze_single_file "$1" "$2"
+        ;;
+esac
+EOF
+
+chmod +x /usr/local/bin/MO-analyze-config
+3. Script de Demostración
+bash
+# Crear script de demostración
+cat > /root/MO-config-demo.sh << 'EOF'
+#!/bin/bash
+echo "╔════════════════════════════════════════════════════════════════╗"
+echo "║           MO-capture Config Analysis Demo                    ║"
+echo "╚════════════════════════════════════════════════════════════════╝"
+
+echo ""
+echo "=== Creando archivos de configuración de prueba ==="
+
+# Crear directorio de prueba
+TEST_DIR="/tmp/mo-config-test"
+rm -rf "$TEST_DIR"
+mkdir -p "$TEST_DIR"
+
+# 1. Archivo .conf de ejemplo (estilo nginx)
+cat > "$TEST_DIR/demo.conf" << 'CONFIGF'
+# Configuración de demostración MO-capture
+# Servidor web básico
+
+[server]
+host = 0.0.0.0
+port = 8080
+name = MO-capture Demo Server
+
+[database]
+host = localhost
+port = 5432
+name = app_db
+user = app_user
+password = secret123
+
+[logging]
+level = info
+file = /var/log/mo-app.log
+max_size = 10MB
+
+# Configuración de red
+[network]
+timeout = 30
+retries = 3
+CONFIGF
+
+# 2. Archivo YAML de ejemplo
+cat > "$TEST_DIR/app-config.yaml" << 'YAMLF'
+app:
+  name: "MO-capture Demo"
+  version: "1.0.0"
+  debug: false
+
+server:
+  host: "0.0.0.0"
+  port: 8080
+  workers: 4
+
+database:
+  primary:
+    host: "db1.example.com"
+    port: 5432
+    name: "primary_db"
+  replica:
+    host: "db2.example.com"
+    port: 5432
+    name: "replica_db"
+
+features:
+  - "authentication"
+  - "logging"
+  - "monitoring"
+YAMLF
+
+# 3. Archivo JSON de ejemplo
+cat > "$TEST_DIR/settings.json" << 'JSONF'
+{
+  "application": {
+    "name": "MO-capture Analyzer",
+    "version": "2.1.0",
+    "environment": "production"
+  },
+  "services": {
+    "api": {
+      "host": "api.example.com",
+      "port": 443,
+      "timeout": 30
+    },
+    "cache": {
+      "host": "redis.example.com",
+      "port": 6379,
+      "database": 0
+    }
+  },
+  "security": {
+    "ssl_enabled": true,
+    "cors_origins": ["https://example.com", "https://app.example.com"]
+  }
+}
+JSONF
+
+echo "✓ Archivos de prueba creados en: $TEST_DIR"
+
+echo ""
+echo "=== Demo 1: Análisis individual de archivos ==="
+
+echo "1. Analizando demo.conf..."
+MO-analyze-config "$TEST_DIR/demo.conf" --output /tmp/demo-conf-analysis.json
+
+echo ""
+echo "2. Analizando app-config.yaml..."
+MO-analyze-config "$TEST_DIR/app-config.yaml" --output /tmp/app-yaml-analysis.json
+
+echo ""
+echo "3. Analizando settings.json..."
+MO-analyze-config "$TEST_DIR/settings.json" --output /tmp/settings-json-analysis.json
+
+echo ""
+echo "=== Demo 2: Análisis por lotes ==="
+MO-analyze-config --batch "$TEST_DIR"
+
+echo ""
+echo "=== Demo 3: Ver resultados ==="
+
+echo "Contenido de análisis de demo.conf (primeras 20 líneas):"
+if [[ -f "/tmp/demo-conf-analysis.json" ]]; then
+    jq '.' "/tmp/demo-conf-analysis.json" | head -20
+else
+    python3 -m json.tool "/tmp/demo-conf-analysis.json" 2>/dev/null | head -20 || \
+    head -20 "/tmp/demo-conf-analysis.json"
+fi
+
+echo ""
+echo "=== Demo 4: Integración con MO-capture ==="
+
+# Simular un template MO-capture
+cat > "/tmp/mo-template-demo.json" << 'TEMPLATE'
+{
+  "MO_template": {
+    "version": "2.2",
+    "system": "Devuan13-LXC",
+    "timestamp": "2025-11-17T21:00:00+00:00",
+    "command": "apt-get install demo-app",
+    "generator": "MO-capture"
+  },
+  "operations": {
+    "files_created": [
+      {
+        "path": "/tmp/mo-config-test/demo.conf",
+        "size": 456,
+        "permissions": "644"
+      },
+      {
+        "path": "/tmp/mo-config-test/app-config.yaml",
+        "size": 389,
+        "permissions": "644"
+      }
+    ]
+  }
+}
+TEMPLATE
+
+echo "Integrando análisis con template MO-capture..."
+MO-analyze-config --integrate-with "/tmp/mo-template-demo.json"
+
+echo ""
+echo "=== Resumen ==="
+echo "Archivos analizados:"
+find /tmp -name "*analysis.json" -type f | while read file; do
+    echo "  ✓ $(basename "$file")"
+done
+
+echo ""
+echo "Estructura de análisis creada:"
+echo "  • Configuración parseada en secciones"
+echo "  • Parámetros y valores extraídos"
+echo "  • Metadatos de archivos"
+echo "  • Templates JSON listos para MO-capture"
+
+echo ""
+echo "╔════════════════════════════════════════════════════════════════╗"
+echo "║                   Demo Completado                            ║"
+echo "╚════════════════════════════════════════════════════════════════╝"
+EOF
+
+chmod +x /root/MO-config-demo.sh
+4. Instalar Dependencias
+bash
+# Instalar dependencias Python necesarias
+apt-get update
+apt-get install -y python3-pip
+pip3 install pyyaml
+
+# Verificar instalación
+python3 -c "import yaml; print('PyYAML disponible')"
+5. Probar el Sistema
+bash
+# Ejecutar demostración
+/root/MO-config-demo.sh
+
+# Probar manualmente con archivos reales del sistema
+MO-analyze-config /etc/hosts
+MO-analyze-config --batch /etc/network/
+Características de la Extensión
+✅ Formatos Soportados:
+.conf, .cfg (estilo Linux)
+
+.ini (secciones clave=valor)
+
+.yaml, .yml
+
+.json
+
+.properties (Java)
+
+.xml (básico)
+
+Archivos de texto genéricos
+
+✅ Análisis Incluye:
+Estructura de secciones y parámetros
+
+Valores y tipos de datos
+
+Comentarios y metadatos
+
+Líneas originales para trazabilidad
+
+Información de archivos (tamaño, permisos)
+
+✅ Integración con MO-capture:
+Comando MO-analyze-config para análisis individual
+
+Análisis por lotes con --batch
+
+Integración automática con templates MO-capture existentes
+
+Templates JSON listos para replicación
+
+Ejemplo de Output
+El análisis generará templates como:
+
+json
+{
+  "MO_config_template": {
+    "version": "1.0",
+    "file_path": "/etc/nginx/nginx.conf",
+    "analysis_timestamp": "2025-11-17T21:00:00",
+    "analyzer": "MO-config-analyzer"
+  },
+  "config_structure": {
+    "sections": {
+      "server": {
+        "listen": {"value": "80", "line": 5},
+        "server_name": {"value": "localhost", "line": 6}
+      }
+    }
+  },
+  "summary": {
+    "total_sections": 2,
+    "total_parameters": 8,
+    "format": "conf"
+  }
+}
+Próximos Pasos
+Ejecutar la demostración para ver el sistema en acción
+
+Probar con archivos reales del sistema (/etc/ network, nginx, etc.)
+
+Integrar con MO-capture para análisis automático durante instalaciones
+
+Extender para soportar más formatos específicos
+

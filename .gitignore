@@ -1,0 +1,59 @@
+# Backup and compressed files
+*.tar.gz
+*.zip
+*.bak
+*.backup
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Log files
+*.log
+
+# Configuration files (if they contain sensitive data)
+config/
+*.config
+
+# Backup directories
+Backup/
+
+# OS generated files
+ehthumbs.db
+Icon?
+Network Trash Folder
+Temporary Items
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+# Windows
+Thumbs.db
+ehthumbs.db
+Icon?
+# Linux
+*~
+
+# IDE specific
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Node modules (in case of JavaScript projects)
+node_modules/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/

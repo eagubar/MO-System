@@ -1,0 +1,1909 @@
+ConfigMO - Sistema MOS para Linux Filesystem
+Voy a crear el proyecto completo siguiendo la filosofía MOShell. Aquí está la implementación:
+
+📁 Estructura del Proyecto
+text
+
+configmo/
+├── README.md
+├── requirements.txt
+├── setup.py
+├── configmo/
+│   ├── __init__.py
+│   ├── models/
+│   │   ├── __init__.py
+│   │   ├── mo.py
+│   │   ├── attribute.py
+│   │   └── types.py
+│   ├── parsers/
+│   │   ├── __init__.py
+│   │   ├── base_parser.py
+│   │   ├── yaml_parser.py
+│   │   ├── json_parser.py
+│   │   ├── ini_parser.py
+│   │   └── text_parser.py
+│   ├── core/
+│   │   ├── __init__.py
+│   │   ├── mos_manager.py
+│   │   ├── mos_operations.py
+│   │   └── mos_audit.py
+│   ├── cli/
+│   │   ├── __init__.py
+│   │   ├── mos_shell.py
+│   │   └── commands/
+│   │       ├── __init__.py
+│   │       ├── navigation.py
+│   │       ├── modification.py
+│   │       ├── audit.py
+│   │       └── admin.py
+│   └── utils/
+│       ├── __init__.py
+│       ├── formatters.py
+│       ├── validators.py
+│       └── backup.py
+└── tests/
+    ├── __init__.py
+    ├── test_models.py
+    ├── test_parsers.py
+    └── test_operations.py
+📝 Archivos de Implementación
+1. requirements.txt
+txt
+
+pyyaml>=6.0
+toml>=0.10.2
+configparser>=5.3.0
+rich>=13.0.0
+prompt-toolkit>=3.0.0
+tabulate>=0.9.0
+2. setup.py
+Python
+
+from setuptools import setup, find_packages
+
+setup(
+    name="configmo",
+    version="2.0.0",
+    description="MOShell-style Configuration Management for Linux Filesystem",
+    author="ConfigMO Team",
+    packages=find_packages(),
+    install_requires=[
+        'pyyaml>=6.0',
+        'toml>=0.10.2',
+        'configparser>=5.3.0',
+        'rich>=13.0.0',
+        'prompt-toolkit>=3.0.0',
+        'tabulate>=0.9.0',
+    ],
+    entry_points={
+        'console_scripts': [
+            'configmo=configmo.cli.mos_shell:main',
+        ],
+    },
+    python_requires='>=3.8',
+)
+3. configmo/models/types.py
+Python
+
+from enum import Enum
+from typing import Any
+
+class MOType(Enum):
+    """Tipos de Managed Objects"""
+    CONFIG_ROOT = "ConfigRoot"
+    SYSTEM_CONFIG = "SystemConfig"
+    NETWORK_CONFIG = "NetworkConfig"
+    INTERFACE = "Interface"
+    SERVICE_CONFIG = "ServiceConfig"
+    SERVICE = "Service"
+    SECURITY_CONFIG = "SecurityConfig"
+    CONFIG = "Config"
+    USER_CONFIG = "UserConfig"
+    USER = "User"
+    SHELL_CONFIG = "ShellConfig"
+    RUNTIME_CONFIG = "RuntimeConfig"
+    APP_CONFIG = "AppConfig"
+    DIRECTORY = "Directory"
+    FILE = "File"
+
+class AttributeType(Enum):
+    """Tipos de atributos MOS"""
+    STRING = "String"
+    INTEGER = "Integer"
+    FLOAT = "Float"
+    BOOLEAN = "Boolean"
+    LIST = "List"
+    DICT = "Dict"
+    IP_ADDRESS = "IpAddress"
+    PATH = "Path"
+
+class AttributeAccess(Enum):
+    """Control de acceso a atributos"""
+    READ_ONLY = "RO"
+    READ_WRITE = "RW"
+    WRITE_ONLY = "WO"
+
+class MOStatus(Enum):
+    """Estado del MO"""
+    SYNC = "SYNC"
+    MODIFIED = "MODIFIED"
+    PENDING = "PENDING"
+    ERROR = "ERROR"
+
+class OperationType(Enum):
+    """Tipos de operaciones MOS"""
+    GET = "GET"
+    SET = "SET"
+    COMMIT = "COMMIT"
+    ROLLBACK = "ROLLBACK"
+    CREATE = "CREATE"
+    DELETE = "DELETE"
+4. configmo/models/attribute.py
+Python
+
+from typing import Any, List, Optional
+from datetime import datetime
+from .types import AttributeType, AttributeAccess
+
+class Attribute:
+    """Atributo MOS con semántica completa"""
+    
+    def __init__(
+        self,
+        name: str,
+        value: Any,
+        attr_type: AttributeType,
+        access: AttributeAccess = AttributeAccess.READ_WRITE,
+        path_in_file: Optional[List[str]] = None,
+        description: str = ""
+    ):
+        self.name = name
+        self.value = value
+        self.original_value = value
+        self.attr_type = attr_type
+        self.access = access
+        self.path_in_file = path_in_file or []
+        self.description = description
+        self.last_modified = datetime.now()
+        self.modified_by = None
+        
+    def is_modified(self) -> bool:
+        """Verifica si el atributo fue modificado"""
+        return self.value != self.original_value
+    
+    def is_writable(self) -> bool:
+        """Verifica si el atributo es escribible"""
+        return self.access in [AttributeAccess.READ_WRITE, AttributeAccess.WRITE_ONLY]
+    
+    def is_readable(self) -> bool:
+        """Verifica si el atributo es legible"""
+        return self.access in [AttributeAccess.READ_WRITE, AttributeAccess.READ_ONLY]
+    
+    def to_mos_string(self, show_modified: bool = True) -> str:
+        """Formato string estilo MOS"""
+        modified_marker = " [MODIFIED]" if show_modified and self.is_modified() else ""
+        return f".{self.name}{modified_marker} = {self._format_value()}"
+    
+    def _format_value(self) -> str:
+        """Formatea el valor según su tipo"""
+        if isinstance(self.value, str):
+            return f'"{self.value}"'
+        elif isinstance(self.value, list):
+            return f"[{', '.join(str(v) for v in self.value)}]"
+        elif isinstance(self.value, dict):
+            return str(self.value)
+        else:
+            return str(self.value)
+    
+    def reset(self):
+        """Resetea el atributo a su valor original"""
+        self.value = self.original_value
+        self.last_modified = datetime.now()
+    
+    def commit(self):
+        """Confirma los cambios (actualiza original_value)"""
+        self.original_value = self.value
+        self.last_modified = datetime.now()
+    
+    def __repr__(self) -> str:
+        return f"Attribute({self.name}={self.value}, type={self.attr_type.value})"
+5. configmo/models/mo.py
+Python
+
+from typing import Dict, List, Optional, Any
+from pathlib import Path
+from datetime import datetime
+from .types import MOType, MOStatus
+from .attribute import Attribute
+
+class ManagedObject:
+    """Managed Object idéntico a MOShell"""
+    
+    def __init__(
+        self,
+        mo_id: str,
+        mo_type: MOType,
+        fdn: str,
+        file_path: Optional[Path] = None,
+        parent: Optional['ManagedObject'] = None
+    ):
+        self.mo_id = mo_id  # "Interface=eth0"
+        self.mo_type = mo_type
+        self.fdn = fdn  # "ConfigRoot=/,NetworkConfig=network,Interface=eth0"
+        self.file_path = file_path
+        self.parent = parent
+        self.children: List[ManagedObject] = []
+        self.attributes: Dict[str, Attribute] = {}
+        self.status = MOStatus.SYNC
+        self.created_at = datetime.now()
+        self.last_modified = datetime.now()
+        
+    def get_ldn(self) -> str:
+        """Local Distinguished Name (último elemento del FDN)"""
+        return self.fdn.split(',')[-1] if ',' in self.fdn else self.fdn
+    
+    def get_parent_fdn(self) -> str:
+        """FDN del padre"""
+        parts = self.fdn.split(',')
+        return ','.join(parts[:-1]) if len(parts) > 1 else ""
+    
+    def add_child(self, child: 'ManagedObject'):
+        """Agrega un MO hijo"""
+        if child not in self.children:
+            self.children.append(child)
+            child.parent = self
+    
+    def remove_child(self, child: 'ManagedObject'):
+        """Elimina un MO hijo"""
+        if child in self.children:
+            self.children.remove(child)
+            child.parent = None
+    
+    def add_attribute(self, attribute: Attribute):
+        """Agrega un atributo al MO"""
+        self.attributes[attribute.name] = attribute
+    
+    def get_attribute(self, name: str) -> Optional[Attribute]:
+        """Obtiene un atributo por nombre"""
+        return self.attributes.get(name)
+    
+    def has_modified_attributes(self) -> bool:
+        """Verifica si hay atributos modificados"""
+        return any(attr.is_modified() for attr in self.attributes.values())
+    
+    def get_modified_attributes(self) -> Dict[str, Attribute]:
+        """Obtiene solo los atributos modificados"""
+        return {
+            name: attr 
+            for name, attr in self.attributes.items() 
+            if attr.is_modified()
+        }
+    
+    def update_status(self):
+        """Actualiza el estado del MO"""
+        if self.has_modified_attributes():
+            self.status = MOStatus.MODIFIED
+        else:
+            self.status = MOStatus.SYNC
+    
+    def get_depth(self) -> int:
+        """Obtiene la profundidad en la jerarquía"""
+        return len(self.fdn.split(','))
+    
+    def get_all_children_recursive(self) -> List['ManagedObject']:
+        """Obtiene todos los hijos recursivamente"""
+        all_children = []
+        for child in self.children:
+            all_children.append(child)
+            all_children.extend(child.get_all_children_recursive())
+        return all_children
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convierte el MO a diccionario"""
+        return {
+            'mo_id': self.mo_id,
+            'mo_type': self.mo_type.value,
+            'fdn': self.fdn,
+            'file_path': str(self.file_path) if self.file_path else None,
+            'status': self.status.value,
+            'children_count': len(self.children),
+            'attributes_count': len(self.attributes),
+            'modified': self.has_modified_attributes()
+        }
+    
+    def __repr__(self) -> str:
+        return f"MO({self.fdn}, type={self.mo_type.value}, children={len(self.children)})"
+    
+    def __str__(self) -> str:
+        return self.fdn
+6. configmo/parsers/base_parser.py
+Python
+
+from abc import ABC, abstractmethod
+from typing import Dict, Any, List
+from pathlib import Path
+from ..models.mo import ManagedObject
+from ..models.attribute import Attribute
+from ..models.types import AttributeType, AttributeAccess
+
+class MOSBaseParser(ABC):
+    """Parser base con filosofía MOS"""
+    
+    def __init__(self, file_path: Path):
+        self.file_path = file_path
+        self.parsed_data = {}
+        
+    @abstractmethod
+    def parse(self) -> Dict[str, Any]:
+        """Parsea el archivo y retorna los datos"""
+        pass
+    
+    @abstractmethod
+    def write(self, data: Dict[str, Any]) -> bool:
+        """Escribe los datos al archivo"""
+        pass
+    
+    def extract_attributes_mos(self, mo: ManagedObject) -> Dict[str, Attribute]:
+        """Extrae atributos en formato MOS puro"""
+        attributes = {}
+        flattened = self.flatten_dict(self.parsed_data)
+        
+        for dotted_path, value in flattened.items():
+            attr = Attribute(
+                name=dotted_path,
+                value=value,
+                attr_type=self._infer_mos_type(value),
+                access=self._determine_mos_access(mo, dotted_path),
+                path_in_file=dotted_path.split('.')
+            )
+            attributes[dotted_path] = attr
+            
+        return attributes
+    
+    def flatten_dict(self, d: Dict[str, Any], parent_key: str = '', sep: str = '.') -> Dict[str, Any]:
+        """Aplana un diccionario anidado con notación de puntos"""
+        items = []
+        for k, v in d.items():
+            new_key = f"{parent_key}{sep}{k}" if parent_key else k
+            
+            if isinstance(v, dict):
+                items.extend(self.flatten_dict(v, new_key, sep=sep).items())
+            elif isinstance(v, list):
+                for i, item in enumerate(v):
+                    if isinstance(item, dict):
+                        items.extend(
+                            self.flatten_dict(item, f"{new_key}[{i}]", sep=sep).items()
+                        )
+                    else:
+                        items.append((f"{new_key}[{i}]", item))
+            else:
+                items.append((new_key, v))
+                
+        return dict(items)
+    
+    def unflatten_dict(self, d: Dict[str, Any], sep: str = '.') -> Dict[str, Any]:
+        """Deaplana un diccionario con notación de puntos"""
+        result = {}
+        
+        for key, value in d.items():
+            parts = key.split(sep)
+            current = result
+            
+            for i, part in enumerate(parts[:-1]):
+                # Manejo de arrays
+                if '[' in part:
+                    base_key, index = part.split('[')
+                    index = int(index.rstrip(']'))
+                    
+                    if base_key not in current:
+                        current[base_key] = []
+                    
+                    while len(current[base_key]) <= index:
+                        current[base_key].append({})
+                    
+                    current = current[base_key][index]
+                else:
+                    if part not in current:
+                        current[part] = {}
+                    current = current[part]
+            
+            # Último elemento
+            last_part = parts[-1]
+            if '[' in last_part:
+                base_key, index = last_part.split('[')
+                index = int(index.rstrip(']'))
+                
+                if base_key not in current:
+                    current[base_key] = []
+                
+                while len(current[base_key]) <= index:
+                    current[base_key].append(None)
+                
+                current[base_key][index] = value
+            else:
+                current[last_part] = value
+                
+        return result
+    
+    def _infer_mos_type(self, value: Any) -> AttributeType:
+        """Infiere el tipo MOS del valor"""
+        if isinstance(value, bool):
+            return AttributeType.BOOLEAN
+        elif isinstance(value, int):
+            return AttributeType.INTEGER
+        elif isinstance(value, float):
+            return AttributeType.FLOAT
+        elif isinstance(value, list):
+            return AttributeType.LIST
+        elif isinstance(value, dict):
+            return AttributeType.DICT
+        elif isinstance(value, str):
+            # Detectar IP address
+            if self._is_ip_address(value):
+                return AttributeType.IP_ADDRESS
+            # Detectar path
+            elif value.startswith('/') or '\\' in value:
+                return AttributeType.PATH
+            else:
+                return AttributeType.STRING
+        else:
+            return AttributeType.STRING
+    
+    def _is_ip_address(self, value: str) -> bool:
+        """Verifica si es una dirección IP"""
+        import re
+        ip_pattern = r'^(\d{1,3}\.){3}\d{1,3}(\/\d{1,2})?$'
+        return bool(re.match(ip_pattern, value))
+    
+    def _determine_mos_access(self, mo: ManagedObject, attribute_path: str) -> AttributeAccess:
+        """Determina el acceso del atributo según contexto MOS"""
+        # Atributos del sistema son generalmente RO
+        readonly_patterns = ['version', 'created', 'modified', 'id', 'uuid']
+        
+        for pattern in readonly_patterns:
+            if pattern in attribute_path.lower():
+                return AttributeAccess.READ_ONLY
+        
+        return AttributeAccess.READ_WRITE
+7. configmo/parsers/yaml_parser.py
+Python
+
+import yaml
+from typing import Dict, Any
+from pathlib import Path
+from .base_parser import MOSBaseParser
+
+class YAMLParser(MOSBaseParser):
+    """Parser para archivos YAML"""
+    
+    def parse(self) -> Dict[str, Any]:
+        """Parsea archivo YAML"""
+        try:
+            with open(self.file_path, 'r') as f:
+                self.parsed_data = yaml.safe_load(f) or {}
+            return self.parsed_data
+        except Exception as e:
+            raise Exception(f"Error parsing YAML file {self.file_path}: {e}")
+    
+    def write(self, data: Dict[str, Any]) -> bool:
+        """Escribe datos a archivo YAML"""
+        try:
+            with open(self.file_path, 'w') as f:
+                yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+            return True
+        except Exception as e:
+            raise Exception(f"Error writing YAML file {self.file_path}: {e}")
+8. configmo/parsers/json_parser.py
+Python
+
+import json
+from typing import Dict, Any
+from pathlib import Path
+from .base_parser import MOSBaseParser
+
+class JSONParser(MOSBaseParser):
+    """Parser para archivos JSON"""
+    
+    def parse(self) -> Dict[str, Any]:
+        """Parsea archivo JSON"""
+        try:
+            with open(self.file_path, 'r') as f:
+                self.parsed_data = json.load(f)
+            return self.parsed_data
+        except Exception as e:
+            raise Exception(f"Error parsing JSON file {self.file_path}: {e}")
+    
+    def write(self, data: Dict[str, Any]) -> bool:
+        """Escribe datos a archivo JSON"""
+        try:
+            with open(self.file_path, 'w') as f:
+                json.dump(data, f, indent=2)
+            return True
+        except Exception as e:
+            raise Exception(f"Error writing JSON file {self.file_path}: {e}")
+9. configmo/parsers/ini_parser.py
+Python
+
+import configparser
+from typing import Dict, Any
+from pathlib import Path
+from .base_parser import MOSBaseParser
+
+class INIParser(MOSBaseParser):
+    """Parser para archivos INI"""
+    
+    def parse(self) -> Dict[str, Any]:
+        """Parsea archivo INI"""
+        try:
+            config = configparser.ConfigParser()
+            config.read(self.file_path)
+            
+            self.parsed_data = {}
+            for section in config.sections():
+                self.parsed_data[section] = dict(config[section])
+                
+            return self.parsed_data
+        except Exception as e:
+            raise Exception(f"Error parsing INI file {self.file_path}: {e}")
+    
+    def write(self, data: Dict[str, Any]) -> bool:
+        """Escribe datos a archivo INI"""
+        try:
+            config = configparser.ConfigParser()
+            
+            for section, values in data.items():
+                config[section] = values
+            
+            with open(self.file_path, 'w') as f:
+                config.write(f)
+            return True
+        except Exception as e:
+            raise Exception(f"Error writing INI file {self.file_path}: {e}")
+10. configmo/parsers/text_parser.py
+Python
+
+from typing import Dict, Any
+from pathlib import Path
+from .base_parser import MOSBaseParser
+
+class TextParser(MOSBaseParser):
+    """Parser para archivos de texto simples"""
+    
+    def parse(self) -> Dict[str, Any]:
+        """Parsea archivo de texto"""
+        try:
+            with open(self.file_path, 'r') as f:
+                lines = f.readlines()
+            
+            self.parsed_data = {}
+            for i, line in enumerate(lines):
+                line = line.rstrip('\n')
+                if '=' in line and not line.strip().startswith('#'):
+                    key, value = line.split('=', 1)
+                    self.parsed_data[key.strip()] = value.strip()
+                else:
+                    self.parsed_data[f'line_{i+1}'] = line
+                    
+            return self.parsed_data
+        except Exception as e:
+            raise Exception(f"Error parsing text file {self.file_path}: {e}")
+    
+    def write(self, data: Dict[str, Any]) -> bool:
+        """Escribe datos a archivo de texto"""
+        try:
+            with open(self.file_path, 'w') as f:
+                for key, value in data.items():
+                    if key.startswith('line_'):
+                        f.write(f"{value}\n")
+                    else:
+                        f.write(f"{key}={value}\n")
+            return True
+        except Exception as e:
+            raise Exception(f"Error writing text file {self.file_path}: {e}")
+11. configmo/core/mos_manager.py
+Python
+
+from typing import Dict, List, Optional
+from pathlib import Path
+import fnmatch
+from ..models.mo import ManagedObject
+from ..models.types import MOType
+from ..parsers.yaml_parser import YAMLParser
+from ..parsers.json_parser import JSONParser
+from ..parsers.ini_parser import INIParser
+from ..parsers.text_parser import TextParser
+from ..parsers.base_parser import MOSBaseParser
+
+class MOSManager:
+    """Motor principal con comportamiento MOS"""
+    
+    # Extensiones soportadas
+    PARSER_MAP = {
+        '.yaml': YAMLParser,
+        '.yml': YAMLParser,
+        '.json': JSONParser,
+        '.ini': INIParser,
+        '.conf': INIParser,
+        '.cfg': INIParser,
+        '.txt': TextParser,
+        '.config': TextParser,
+    }
+    
+    # Directorios a ignorar
+    IGNORE_DIRS = {
+        '.git', '.svn', '__pycache__', 'node_modules',
+        '.cache', 'venv', 'env', '.venv'
+    }
+    
+    def __init__(self, root_path: str = '/tmp/configmo_test'):
+        self.root_path = Path(root_path)
+        self.root_mo: Optional[ManagedObject] = None
+        self.mo_registry: Dict[str, ManagedObject] = {}
+        self.parser_cache: Dict[str, MOSBaseParser] = {}
+        
+    def initialize_mos_tree(self):
+        """Construye árbol MOS desde filesystem"""
+        if not self.root_path.exists():
+            self.root_path.mkdir(parents=True, exist_ok=True)
+            
+        self.root_mo = ManagedObject(
+            mo_id=f"ConfigRoot={self.root_path.name}",
+            mo_type=MOType.CONFIG_ROOT,
+            fdn=f"ConfigRoot={self.root_path.name}",
+            file_path=self.root_path
+        )
+        
+        self.mo_registry[self.root_mo.fdn] = self.root_mo
+        self._build_mos_hierarchy(self.root_path, self.root_mo)
+        
+    def _build_mos_hierarchy(self, path: Path, parent_mo: ManagedObject):
+        """Construye jerarquía MOS recursiva"""
+        if not path.exists() or not path.is_dir():
+            return
+            
+        for item in sorted(path.iterdir()):
+            # Ignorar directorios especiales
+            if item.name in self.IGNORE_DIRS:
+                continue
+                
+            if item.is_dir():
+                mo = self._create_directory_mo(item, parent_mo)
+                if mo:
+                    self._build_mos_hierarchy(item, mo)
+            elif item.is_file() and self._is_config_file(item):
+                self._create_file_mo(item, parent_mo)
+    
+    def _create_directory_mo(self, path: Path, parent_mo: ManagedObject) -> Optional[ManagedObject]:
+        """Crea un MO para un directorio"""
+        mo_type = self._infer_mo_type_from_name(path.name)
+        mo_id = f"{mo_type.value}={path.name}"
+        fdn = f"{parent_mo.fdn},{mo_id}"
+        
+        mo = ManagedObject(
+            mo_id=mo_id,
+            mo_type=mo_type,
+            fdn=fdn,
+            file_path=path,
+            parent=parent_mo
+        )
+        
+        parent_mo.add_child(mo)
+        self.mo_registry[fdn] = mo
+        
+        return mo
+    
+    def _create_file_mo(self, path: Path, parent_mo: ManagedObject):
+        """Crea un MO para un archivo de configuración"""
+        mo_type = MOType.CONFIG
+        mo_id = f"{mo_type.value}={path.stem}"
+        fdn = f"{parent_mo.fdn},{mo_id}"
+        
+        mo = ManagedObject(
+            mo_id=mo_id,
+            mo_type=mo_type,
+            fdn=fdn,
+            file_path=path,
+            parent=parent_mo
+        )
+        
+        # Parsear archivo y extraer atributos
+        self._load_mo_attributes(mo)
+        
+        parent_mo.add_child(mo)
+        self.mo_registry[fdn] = mo
+    
+    def _is_config_file(self, path: Path) -> bool:
+        """Verifica si es un archivo de configuración soportado"""
+        return path.suffix.lower() in self.PARSER_MAP
+    
+    def _infer_mo_type_from_name(self, name: str) -> MOType:
+        """Infiere el tipo de MO desde el nombre del directorio"""
+        name_lower = name.lower()
+        
+        if 'network' in name_lower or 'netplan' in name_lower:
+            return MOType.NETWORK_CONFIG
+        elif 'service' in name_lower or 'systemd' in name_lower:
+            return MOType.SERVICE_CONFIG
+        elif 'security' in name_lower or 'ssh' in name_lower:
+            return MOType.SECURITY_CONFIG
+        elif 'user' in name_lower or 'home' in name_lower:
+            return MOType.USER_CONFIG
+        elif 'app' in name_lower or 'application' in name_lower:
+            return MOType.APP_CONFIG
+        else:
+            return MOType.DIRECTORY
+    
+    def _get_parser(self, file_path: Path) -> Optional[MOSBaseParser]:
+        """Obtiene el parser apropiado para el archivo"""
+        suffix = file_path.suffix.lower()
+        parser_class = self.PARSER_MAP.get(suffix)
+        
+        if parser_class:
+            return parser_class(file_path)
+        return None
+    
+    def _load_mo_attributes(self, mo: ManagedObject):
+        """Carga los atributos de un MO desde el archivo"""
+        if not mo.file_path or not mo.file_path.is_file():
+            return
+            
+        parser = self._get_parser(mo.file_path)
+        if not parser:
+            return
+            
+        try:
+            parser.parse()
+            attributes = parser.extract_attributes_mos(mo)
+            
+            for attr in attributes.values():
+                mo.add_attribute(attr)
+                
+            self.parser_cache[mo.fdn] = parser
+        except Exception as e:
+            print(f"Warning: Could not parse {mo.file_path}: {e}")
+    
+    def resolve_mo(self, fdn_pattern: str) -> Optional[ManagedObject]:
+        """Resuelve un MO por FDN o patrón"""
+        # Búsqueda exacta
+        if fdn_pattern in self.mo_registry:
+            return self.mo_registry[fdn_pattern]
+        
+        # Búsqueda por patrón
+        for fdn, mo in self.mo_registry.items():
+            if fnmatch.fnmatch(fdn, f"*{fdn_pattern}*"):
+                return mo
+                
+        return None
+    
+    def find_mos(self, pattern: str = "*") -> List[ManagedObject]:
+        """Encuentra MOs que coinciden con el patrón"""
+        if pattern == "all" or pattern == "*":
+            return list(self.mo_registry.values())
+        
+        results = []
+        for fdn, mo in self.mo_registry.items():
+            if fnmatch.fnmatch(mo.mo_id, pattern) or fnmatch.fnmatch(fdn, f"*{pattern}*"):
+                results.append(mo)
+                
+        return results
+    
+    def get_mo_hierarchy(self, mo: ManagedObject, indent: int = 0) -> List[str]:
+        """Obtiene la representación jerárquica de un MO"""
+        lines = []
+        prefix = "  " * indent
+        
+        status_marker = "●" if mo.has_modified_attributes() else "○"
+        line = f"{prefix}{status_marker} {mo.mo_id}"
+        
+        if mo.file_path and mo.file_path.is_file():
+            line += f" [{mo.file_path.name}]"
+            
+        lines.append(line)
+        
+        for child in mo.children:
+            lines.extend(self.get_mo_hierarchy(child, indent + 1))
+            
+        return lines
+12. configmo/core/mos_operations.py
+Python
+
+from typing import Dict, List, Optional, Any
+import fnmatch
+from ..models.mo import ManagedObject
+from ..models.attribute import Attribute
+from ..models.types import OperationType
+from .mos_manager import MOSManager
+from .mos_audit import MOSAuditSystem
+
+class MOSOperations:
+    """Operaciones MOS canónicas"""
+    
+    def __init__(self, manager: MOSManager, audit: MOSAuditSystem):
+        self.manager = manager
+        self.audit = audit
+        self.pending_changes: Dict[str, Dict[str, Any]] = {}
+        
+    def mos_get(self, fdn: str, attr_pattern: str = "*") -> Dict[str, Attribute]:
+        """GET estilo MOS"""
+        mo = self.manager.resolve_mo(fdn)
+        if not mo:
+            raise ValueError(f"MO not found: {fdn}")
+        
+        attributes = mo.attributes
+        
+        if attr_pattern == "*":
+            return attributes
+        
+        # Filtrar por patrón
+        filtered = {}
+        for name, attr in attributes.items():
+            if fnmatch.fnmatch(name, f"*{attr_pattern}*"):
+                filtered[name] = attr
+                
+        return filtered
+    
+    def mos_set(self, fdn: str, attribute: str, value: Any, user: str = "system") -> bool:
+        """SET estilo MOS"""
+        mo = self.manager.resolve_mo(fdn)
+        if not mo:
+            raise ValueError(f"MO not found: {fdn}")
+        
+        attr = mo.get_attribute(attribute)
+        if not attr:
+            raise ValueError(f"Attribute not found: {attribute}")
+        
+        if not attr.is_writable():
+            raise ValueError(f"Attribute {attribute} is read-only")
+        
+        # Guardar valor anterior para auditoría
+        old_value = attr.value
+        
+        # Actualizar valor
+        attr.value = value
+        mo.update_status()
+        
+        # Registrar cambio pendiente
+        if mo.fdn not in self.pending_changes:
+            self.pending_changes[mo.fdn] = {}
+        
+        self.pending_changes[mo.fdn][attribute] = {
+            'old': old_value,
+            'new': value
+        }
+        
+        # Auditoría
+        self.audit.log_operation(
+            operation=OperationType.SET,
+            user=user,
+            mo_fdn=mo.fdn,
+            attribute=attribute,
+            old_value=old_value,
+            new_value=value,
+            status='PENDING'
+        )
+        
+        return True
+    
+    def mos_commit(self, fdn: Optional[str] = None, user: str = "system") -> int:
+        """COMMIT estilo MOS"""
+        targets = []
+        
+        if fdn:
+            mo = self.manager.resolve_mo(fdn)
+            if mo and mo.fdn in self.pending_changes:
+                targets.append(mo)
+        else:
+            # Commit all
+            for mo_fdn in self.pending_changes.keys():
+                mo = self.manager.mo_registry.get(mo_fdn)
+                if mo:
+                    targets.append(mo)
+        
+        committed = 0
+        for mo in targets:
+            if self._commit_mo(mo, user):
+                committed += 1
+                
+        return committed
+    
+    def _commit_mo(self, mo: ManagedObject, user: str) -> bool:
+        """Commit cambios de un MO específico"""
+        if not mo.file_path or not mo.file_path.is_file():
+            return False
+        
+        try:
+            # Obtener parser
+            parser = self.manager.parser_cache.get(mo.fdn)
+            if not parser:
+                parser = self.manager._get_parser(mo.file_path)
+                if not parser:
+                    return False
+            
+            # Construir datos actualizados
+            updated_data = {}
+            for attr in mo.attributes.values():
+                path_parts = attr.path_in_file
+                current = updated_data
+                
+                for part in path_parts[:-1]:
+                    if part not in current:
+                        current[part] = {}
+                    current = current[part]
+                
+                current[path_parts[-1]] = attr.value
+            
+            # Escribir al archivo
+            full_data = parser.unflatten_dict(
+                {attr.name: attr.value for attr in mo.attributes.values()}
+            )
+            parser.write(full_data)
+            
+            # Confirmar atributos
+            for attr in mo.attributes.values():
+                if attr.is_modified():
+                    # Auditoría
+                    self.audit.log_operation(
+                        operation=OperationType.COMMIT,
+                        user=user,
+                        mo_fdn=mo.fdn,
+                        attribute=attr.name,
+                        old_value=attr.original_value,
+                        new_value=attr.value,
+                        status='COMPLETED'
+                    )
+                    attr.commit()
+            
+            # Limpiar cambios pendientes
+            if mo.fdn in self.pending_changes:
+                del self.pending_changes[mo.fdn]
+            
+            mo.update_status()
+            return True
+            
+        except Exception as e:
+            print(f"Error committing {mo.fdn}: {e}")
+            return False
+    
+    def mos_rollback(self, fdn: str, user: str = "system") -> bool:
+        """ROLLBACK estilo MOS"""
+        mo = self.manager.resolve_mo(fdn)
+        if not mo:
+            raise ValueError(f"MO not found: {fdn}")
+        
+        # Revertir atributos
+        for attr in mo.attributes.values():
+            if attr.is_modified():
+                # Auditoría
+                self.audit.log_operation(
+                    operation=OperationType.ROLLBACK,
+                    user=user,
+                    mo_fdn=mo.fdn,
+                    attribute=attr.name,
+                    old_value=attr.value,
+                    new_value=attr.original_value,
+                    status='COMPLETED'
+                )
+                attr.reset()
+        
+        # Limpiar cambios pendientes
+        if mo.fdn in self.pending_changes:
+            del self.pending_changes[mo.fdn]
+        
+        mo.update_status()
+        return True
+    
+    def mos_diff(self, fdn: str) -> Dict[str, Dict[str, Any]]:
+        """DIFF estilo MOS"""
+        mo = self.manager.resolve_mo(fdn)
+        if not mo:
+            raise ValueError(f"MO not found: {fdn}")
+        
+        diff = {}
+        for name, attr in mo.get_modified_attributes().items():
+            diff[name] = {
+                'old': attr.original_value,
+                'new': attr.value
+            }
+            
+        return diff
+    
+    def get_pending_changes(self) -> Dict[str, Dict[str, Any]]:
+        """Obtiene todos los cambios pendientes"""
+        return self.pending_changes
+13. configmo/core/mos_audit.py
+Python
+
+from typing import List, Dict, Any, Optional
+from datetime import datetime
+from pathlib import Path
+import json
+from ..models.types import OperationType
+
+class MOSAuditSystem:
+    """Sistema LGA estilo MOS"""
+    
+    def __init__(self, audit_file: str = "/tmp/configmo_audit.log"):
+        self.audit_file = Path(audit_file)
+        self.audit_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        if not self.audit_file.exists():
+            self.audit_file.write_text("[]")
+    
+    def log_operation(
+        self,
+        operation: OperationType,
+        user: str,
+        mo_fdn: str,
+        attribute: str,
+        old_value: Any,
+        new_value: Any,
+        status: str = 'COMPLETED'
+    ):
+        """Registra una operación MOS"""
+        entry = {
+            'timestamp': datetime.now().isoformat(),
+            'user': user,
+            'operation': operation.value,
+            'mo_fdn': mo_fdn,
+            'attribute': attribute,
+            'old_value': str(old_value),
+            'new_value': str(new_value),
+            'status': status
+        }
+        
+        self._append_entry(entry)
+    
+    def _append_entry(self, entry: Dict[str, Any]):
+        """Agrega una entrada al log de auditoría"""
+        try:
+            # Leer log actual
+            logs = json.loads(self.audit_file.read_text())
+            
+            # Agregar nueva entrada
+            logs.append(entry)
+            
+            # Escribir de vuelta
+            self.audit_file.write_text(json.dumps(logs, indent=2))
+        except Exception as e:
+            print(f"Warning: Could not write audit log: {e}")
+    
+    def query_audit_log(self, filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        """Consulta el log de auditoría con filtros"""
+        try:
+            logs = json.loads(self.audit_file.read_text())
+        except:
+            return []
+        
+        if not filters:
+            return logs
+        
+        # Aplicar filtros
+        filtered = logs
+        
+        if 'user' in filters:
+            filtered = [e for e in filtered if e.get('user') == filters['user']]
+        
+        if 'mo_fdn' in filters:
+            filtered = [e for e in filtered if filters['mo_fdn'] in e.get('mo_fdn', '')]
+        
+        if 'operation' in filters:
+            filtered = [e for e in filtered if e.get('operation') == filters['operation']]
+        
+        if 'from_date' in filters:
+            from_date = filters['from_date']
+            filtered = [e for e in filtered if e.get('timestamp', '') >= from_date]
+        
+        if 'to_date' in filters:
+            to_date = filters['to_date']
+            filtered = [e for e in filtered if e.get('timestamp', '') <= to_date]
+        
+        return filtered
+14. configmo/utils/formatters.py
+Python
+
+from typing import List, Dict, Any
+from ..models.mo import ManagedObject
+from ..models.attribute import Attribute
+from tabulate import tabulate
+
+class MOSTableFormatter:
+    """Formateador de tablas estilo MOS"""
+    
+    @staticmethod
+    def format_lt_output(mos_list: List[ManagedObject]) -> str:
+        """Formato tabla para comando lt"""
+        if not mos_list:
+            return "No MOs found."
+        
+        rows = []
+        for mo in mos_list:
+            rows.append([
+                mo.get_ldn(),
+                mo.mo_type.value,
+                str(mo.file_path) if mo.file_path else "",
+                len(mo.children),
+                mo.status.value
+            ])
+        
+        headers = ['MO ID', 'Type', 'Path', 'Children', 'Status']
+        return tabulate(rows, headers=headers, tablefmt='grid')
+    
+    @staticmethod
+    def format_get_output(mo: ManagedObject, attributes: Dict[str, Attribute]) -> str:
+        """Formato para comando get"""
+        lines = []
+        lines.append(f"MO: {mo.fdn}")
+        lines.append(f"Type: {mo.mo_type.value}")
+        lines.append(f"File: {mo.file_path if mo.file_path else 'N/A'}")
+        lines.append(f"Status: {mo.status.value}")
+        lines.append("")
+        lines.append("Attributes:")
+        
+        if not attributes:
+            lines.append("  (no attributes)")
+        else:
+            for attr_name, attr in sorted(attributes.items()):
+                lines.append(f"  {attr.to_mos_string()}")
+        
+        return '\n'.join(lines)
+    
+    @staticmethod
+    def format_lh_output(hierarchy_lines: List[str]) -> str:
+        """Formato para comando lh (hierarchy)"""
+        return '\n'.join(hierarchy_lines)
+    
+    @staticmethod
+    def format_diff_output(mo: ManagedObject, diff: Dict[str, Dict[str, Any]]) -> str:
+        """Formato para comando diff"""
+        if not diff:
+            return f"No changes in {mo.fdn}"
+        
+        lines = []
+        lines.append(f"Changes in {mo.fdn}:")
+        lines.append("")
+        
+        for attr_name, changes in diff.items():
+            lines.append(f"  .{attr_name}")
+            lines.append(f"    Old: {changes['old']}")
+            lines.append(f"    New: {changes['new']}")
+            lines.append("")
+        
+        return '\n'.join(lines)
+    
+    @staticmethod
+    def format_pending_output(pending: Dict[str, Dict[str, Any]]) -> str:
+        """Formato para comando pending"""
+        if not pending:
+            return "No pending changes."
+        
+        lines = []
+        lines.append("Pending Changes:")
+        lines.append("")
+        
+        for mo_fdn, changes in pending.items():
+            lines.append(f"MO: {mo_fdn}")
+            for attr_name, change in changes.items():
+                lines.append(f"  .{attr_name}: {change['old']} → {change['new']}")
+            lines.append("")
+        
+        return '\n'.join(lines)
+    
+    @staticmethod
+    def format_lga_output(entries: List[Dict[str, Any]]) -> str:
+        """Formato para comando lga (audit log)"""
+        if not entries:
+            return "No audit entries found."
+        
+        rows = []
+        for entry in entries:
+            change = f"{entry.get('old_value', '')} → {entry.get('new_value', '')}"
+            rows.append([
+                entry.get('timestamp', '')[:19],
+                entry.get('user', ''),
+                entry.get('operation', ''),
+                entry.get('mo_fdn', ''),
+                entry.get('attribute', ''),
+                change
+            ])
+        
+        headers = ['Timestamp', 'User', 'Operation', 'MO', 'Attribute', 'Changes']
+        return tabulate(rows, headers=headers, tablefmt='grid')
+15. configmo/cli/mos_shell.py
+Python
+
+import cmd
+import shlex
+import os
+from pathlib import Path
+from ..core.mos_manager import MOSManager
+from ..core.mos_operations import MOSOperations
+from ..core.mos_audit import MOSAuditSystem
+from ..utils.formatters import MOSTableFormatter
+
+class MOSShell(cmd.Cmd):
+    """Shell interactivo idéntico a MOShell"""
+    
+    prompt = 'mos> '
+    intro = '''
+╔════════════════════════════════════════════╗
+║              ConfigMO v2.0                 ║
+║    MOShell for Linux Configuration        ║
+╚════════════════════════════════════════════╝
+
+Type "help" for available commands.
+Type "help <command>" for command details.
+'''
+    
+    def __init__(self, root_path: str = None):
+        super().__init__()
+        
+        # Usar directorio de prueba o el especificado
+        if root_path is None:
+            root_path = os.environ.get('CONFIGMO_ROOT', '/tmp/configmo_test')
+        
+        self.mos_mgr = MOSManager(root_path)
+        self.audit = MOSAuditSystem()
+        self.ops = MOSOperations(self.mos_mgr, self.audit)
+        self.formatter = MOSTableFormatter()
+        self.current_user = os.environ.get('USER', 'system')
+        
+        # Inicializar árbol MOS
+        print(f"Initializing MOS tree from {root_path}...")
+        self.mos_mgr.initialize_mos_tree()
+        print(f"✓ Found {len(self.mos_mgr.mo_registry)} MOs\n")
+    
+    # === COMANDOS DE NAVEGACIÓN ===
+    
+    def do_lt(self, args):
+        """
+        List MOs matching pattern.
+        
+        Usage:
+            lt all              - List all MOs
+            lt <pattern>        - List MOs matching pattern
+            lt NetworkConfig=*  - List all NetworkConfig MOs
+        
+        Examples:
+            mos> lt all
+            mos> lt *eth*
+            mos> lt Config=*
+        """
+        pattern = args.strip() or "all"
+        mos_list = self.mos_mgr.find_mos(pattern)
+        
+        if mos_list:
+            print(self.formatter.format_lt_output(mos_list))
+        else:
+            print(f"No MOs found matching: {pattern}")
+    
+    def do_lh(self, args):
+        """
+        List MO hierarchy (tree view).
+        
+        Usage:
+            lh              - Show complete hierarchy from root
+            lh <pattern>    - Show hierarchy from matching MO
+        
+        Examples:
+            mos> lh
+            mos> lh NetworkConfig=network
+        """
+        if args.strip():
+            mo = self.mos_mgr.resolve_mo(args.strip())
+            if not mo:
+                print(f"MO not found: {args}")
+                return
+        else:
+            mo = self.mos_mgr.root_mo
+        
+        hierarchy = self.mos_mgr.get_mo_hierarchy(mo)
+        print(self.formatter.format_lh_output(hierarchy))
+    
+    def do_get(self, args):
+        """
+        Get MO attributes.
+        
+        Usage:
+            get <fdn>                - Get all attributes
+            get <fdn> <attr>         - Get specific attribute
+            get <fdn> <pattern>      - Get attributes matching pattern
+        
+        Examples:
+            mos> get Config=myconfig
+            mos> get Config=myconfig network
+            mos> get Config=myconfig *.address
+        """
+        parts = shlex.split(args)
+        
+        if len(parts) == 0:
+            print("Usage: get <fdn> [attribute_pattern]")
+            return
+        
+        fdn = parts[0]
+        attr_pattern = parts[1] if len(parts) > 1 else "*"
+        
+        try:
+            mo = self.mos_mgr.resolve_mo(fdn)
+            if not mo:
+                print(f"MO not found: {fdn}")
+                return
+            
+            attributes = self.ops.mos_get(fdn, attr_pattern)
+            print(self.formatter.format_get_output(mo, attributes))
+        except Exception as e:
+            print(f"Error: {e}")
+    
+    def do_pr(self, args):
+        """
+        Print detailed MO information.
+        
+        Usage:
+            pr <fdn>    - Print detailed MO info
+        
+        Examples:
+            mos> pr Config=myconfig
+        """
+        if not args.strip():
+            print("Usage: pr <fdn>")
+            return
+        
+        mo = self.mos_mgr.resolve_mo(args.strip())
+        if not mo:
+            print(f"MO not found: {args}")
+            return
+        
+        # Mostrar información detallada
+        print(f"\n{'='*60}")
+        print(f"MO Details: {mo.fdn}")
+        print(f"{'='*60}")
+        print(f"Type:         {mo.mo_type.value}")
+        print(f"Status:       {mo.status.value}")
+        print(f"File Path:    {mo.file_path if mo.file_path else 'N/A'}")
+        print(f"Parent:       {mo.parent.fdn if mo.parent else 'N/A'}")
+        print(f"Children:     {len(mo.children)}")
+        print(f"Attributes:   {len(mo.attributes)}")
+        print(f"Modified:     {'Yes' if mo.has_modified_attributes() else 'No'}")
+        print(f"Created:      {mo.created_at}")
+        print(f"Last Modified: {mo.last_modified}")
+        
+        if mo.children:
+            print(f"\nChildren:")
+            for child in mo.children:
+                print(f"  - {child.mo_id}")
+        
+        if mo.attributes:
+            print(f"\nAttributes:")
+            for attr in mo.attributes.values():
+                modified = " [MODIFIED]" if attr.is_modified() else ""
+                print(f"  {attr.to_mos_string(show_modified=True)}")
+        
+        print(f"{'='*60}\n")
+    
+    # === COMANDOS DE MODIFICACIÓN ===
+    
+    def do_set(self, args):
+        """
+        Set attribute value.
+        
+        Usage:
+            set <fdn> <attribute> <value>
+        
+        Examples:
+            mos> set Config=myconfig network.ip 192.168.1.10
+            mos> set Config=myconfig port 8080
+        """
+        parts = shlex.split(args)
+        
+        if len(parts) < 3:
+            print("Usage: set <fdn> <attribute> <value>")
+            return
+        
+        fdn = parts[0]
+        attribute = parts[1]
+        value = ' '.join(parts[2:])
+        
+        # Intentar convertir a tipo apropiado
+        try:
+            # Intentar integer
+            if value.isdigit():
+                value = int(value)
+            # Intentar float
+            elif '.' in value and all(p.isdigit() for p in value.split('.', 1)):
+                value = float(value)
+            # Intentar boolean
+            elif value.lower() in ['true', 'false']:
+                value = value.lower() == 'true'
+        except:
+            pass
+        
+        try:
+            self.ops.mos_set(fdn, attribute, value, user=self.current_user)
+            print(f"✓ Attribute updated (pending commit)")
+        except Exception as e:
+            print(f"Error: {e}")
+    
+    def do_pending(self, args):
+        """
+        Show pending changes.
+        
+        Usage:
+            pending
+        
+        Examples:
+            mos> pending
+        """
+        pending = self.ops.get_pending_changes()
+        print(self.formatter.format_pending_output(pending))
+    
+    def do_diff(self, args):
+        """
+        Show differences for MO.
+        
+        Usage:
+            diff <fdn>
+        
+        Examples:
+            mos> diff Config=myconfig
+        """
+        if not args.strip():
+            print("Usage: diff <fdn>")
+            return
+        
+        try:
+            mo = self.mos_mgr.resolve_mo(args.strip())
+            if not mo:
+                print(f"MO not found: {args}")
+                return
+            
+            diff = self.ops.mos_diff(args.strip())
+            print(self.formatter.format_diff_output(mo, diff))
+        except Exception as e:
+            print(f"Error: {e}")
+    
+    def do_commit(self, args):
+        """
+        Commit changes to disk.
+        
+        Usage:
+            commit          - Commit all pending changes
+            commit <fdn>    - Commit changes for specific MO
+            commit all      - Commit all pending changes
+        
+        Examples:
+            mos> commit
+            mos> commit Config=myconfig
+            mos> commit all
+        """
+        fdn = args.strip() if args.strip() and args.strip() != 'all' else None
+        
+        try:
+            count = self.ops.mos_commit(fdn, user=self.current_user)
+            print(f"✓ Committed {count} MO(s)")
+        except Exception as e:
+            print(f"Error: {e}")
+    
+    def do_rollback(self, args):
+        """
+        Rollback pending changes.
+        
+        Usage:
+            rollback <fdn>
+        
+        Examples:
+            mos> rollback Config=myconfig
+        """
+        if not args.strip():
+            print("Usage: rollback <fdn>")
+            return
+        
+        try:
+            self.ops.mos_rollback(args.strip(), user=self.current_user)
+            print(f"✓ Changes rolled back")
+        except Exception as e:
+            print(f"Error: {e}")
+    
+    # === COMANDOS DE AUDITORÍA ===
+    
+    def do_lga(self, args):
+        """
+        Show audit log.
+        
+        Usage:
+            lga                     - Show all audit entries
+            lga <fdn>              - Show entries for specific MO
+            lga --user <username>  - Show entries for specific user
+        
+        Examples:
+            mos> lga
+            mos> lga Config=myconfig
+            mos> lga --user admin
+        """
+        filters = {}
+        parts = shlex.split(args)
+        
+        i = 0
+        while i < len(parts):
+            if parts[i] == '--user' and i + 1 < len(parts):
+                filters['user'] = parts[i + 1]
+                i += 2
+            elif parts[i] == '--from' and i + 1 < len(parts):
+                filters['from_date'] = parts[i + 1]
+                i += 2
+            elif parts[i] == '--to' and i + 1 < len(parts):
+                filters['to_date'] = parts[i + 1]
+                i += 2
+            else:
+                # Asumimos que es un FDN
+                filters['mo_fdn'] = parts[i]
+                i += 1
+        
+        entries = self.audit.query_audit_log(filters)
+        print(self.formatter.format_lga_output(entries))
+    
+    # === COMANDOS DE ADMINISTRACIÓN ===
+    
+    def do_scan(self, args):
+        """
+        Rescan filesystem and rebuild MO tree.
+        
+        Usage:
+            scan
+        
+        Examples:
+            mos> scan
+        """
+        print("Rescanning filesystem...")
+        self.mos_mgr.initialize_mos_tree()
+        print(f"✓ MOS tree updated ({len(self.mos_mgr.mo_registry)} MOs)")
+    
+    def do_reload(self, args):
+        """
+        Reload MO from disk.
+        
+        Usage:
+            reload <fdn>
+        
+        Examples:
+            mos> reload Config=myconfig
+        """
+        if not args.strip():
+            print("Usage: reload <fdn>")
+            return
+        
+        mo = self.mos_mgr.resolve_mo(args.strip())
+        if not mo:
+            print(f"MO not found: {args}")
+            return
+        
+        # Recargar atributos
+        mo.attributes.clear()
+        self.mos_mgr._load_mo_attributes(mo)
+        
+        # Limpiar cambios pendientes
+        if mo.fdn in self.ops.pending_changes:
+            del self.ops.pending_changes[mo.fdn]
+        
+        mo.update_status()
+        print(f"✓ MO reloaded from disk")
+    
+    # === COMANDOS DEL SHELL ===
+    
+    def do_exit(self, args):
+        """Exit the MOS shell."""
+        print("Goodbye!")
+        return True
+    
+    def do_quit(self, args):
+        """Exit the MOS shell."""
+        return self.do_exit(args)
+    
+    def do_EOF(self, args):
+        """Exit on Ctrl+D."""
+        print()
+        return self.do_exit(args)
+    
+    def emptyline(self):
+        """No hago nada en línea vacía."""
+        pass
+    
+    def default(self, line):
+        """Comando no reconocido."""
+        print(f"Unknown command: {line}")
+        print("Type 'help' for available commands.")
+
+def main():
+    """Punto de entrada principal"""
+    import sys
+    
+    root_path = None
+    if len(sys.argv) > 1:
+        root_path = sys.argv[1]
+    
+    shell = MOSShell(root_path)
+    shell.cmdloop()
+
+if __name__ == '__main__':
+    main()
+16. README.md
+Markdown
+
+# ConfigMO - MOShell for Linux Filesystem
+
+Sistema de gestión de configuración estilo MOShell aplicado al filesystem de Linux.
+
+## 🚀 Instalación
+
+```bash
+# Clonar repositorio
+git clone <repo-url>
+cd configmo
+
+# Instalar dependencias
+pip install -r requirements.txt
+
+# Instalar en modo desarrollo
+pip install -e .
+📖 Uso Básico
+Bash
+
+# Iniciar shell (usa /tmp/configmo_test por defecto)
+configmo
+
+# Iniciar shell con directorio específico
+configmo /path/to/config
+
+# O ejecutar directamente
+python -m configmo.cli.mos_shell
+🎯 Comandos Principales
+Navegación
+Bash
+
+mos> lt all                    # Lista todos los MOs
+mos> lt Config=*              # Lista MOs de tipo Config
+mos> lh                       # Vista jerárquica
+mos> get Config=myconfig      # Ver atributos
+mos> pr Config=myconfig       # Detalles completos
+Modificación
+Bash
+
+mos> set Config=myconfig port 8080              # Cambiar valor
+mos> pending                                     # Ver cambios pendientes
+mos> diff Config=myconfig                       # Ver diferencias
+mos> commit Config=myconfig                     # Confirmar cambios
+mos> commit all                                 # Confirmar todos
+mos> rollback Config=myconfig                   # Revertir cambios
+Auditoría
+Bash
+
+mos> lga                      # Ver log completo
+mos> lga Config=myconfig      # Log de un MO
+mos> lga --user admin         # Log por usuario
+Administración
+Bash
+
+mos> scan                     # Rescanear filesystem
+mos> reload Config=myconfig   # Recargar desde disco
+📁 Estructura de Ejemplo
+Crear estructura de prueba:
+
+Bash
+
+mkdir -p /tmp/configmo_test/{network,services,apps}
+
+# Crear archivo YAML
+cat > /tmp/configmo_test/network/eth0.yaml <<EOF
+network:
+  ethernets:
+    eth0:
+      addresses:
+        - 192.168.1.10/24
+      gateway4: 192.168.1.1
+      nameservers:
+        addresses:
+          - 8.8.8.8
+          - 8.8.4.4
+EOF
+
+# Crear archivo JSON
+cat > /tmp/configmo_test/apps/myapp.json <<EOF
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8080
+  },
+  "database": {
+    "host": "localhost",
+    "port": 5432,
+    "name": "mydb"
+  }
+}
+EOF
+
+# Iniciar ConfigMO
+configmo /tmp/configmo_test
+🔬 Ejemplo de Sesión
+Bash
+
+$ configmo /tmp/configmo_test
+
+╔════════════════════════════════════════════╗
+║              ConfigMO v2.0                 ║
+║    MOShell for Linux Configuration        ║
+╚════════════════════════════════════════════╝
+
+Initializing MOS tree from /tmp/configmo_test...
+✓ Found 8 MOs
+
+mos> lt all
++------------------+----------------+--------------------------------+----------+--------+
+| MO ID            | Type           | Path                           | Children | Status |
++------------------+----------------+--------------------------------+----------+--------+
+| ConfigRoot=...   | ConfigRoot     | /tmp/configmo_test            | 3        | SYNC   |
+| Directory=network| Directory      | /tmp/configmo_test/network    | 1        | SYNC   |
+| Config=eth0      | Config         | .../network/eth0.yaml         | 0        | SYNC   |
+| ...              | ...            | ...                           | ...      | ...    |
++------------------+----------------+--------------------------------+----------+--------+
+
+mos> get Config=eth0
+MO: ConfigRoot=configmo_test,Directory=network,Config=eth0
+Type: Config
+File: /tmp/configmo_test/network/eth0.yaml
+Status: SYNC
+
+Attributes:
+  .network.ethernets.eth0.addresses[0] = "192.168.1.10/24"
+  .network.ethernets.eth0.gateway4 = "192.168.1.1"
+  .network.ethernets.eth0.nameservers.addresses[0] = "8.8.8.8"
+  .network.ethernets.eth0.nameservers.addresses[1] = "8.8.4.4"
+
+mos> set Config=eth0 network.ethernets.eth0.addresses[0] 192.168.1.20/24
+✓ Attribute updated (pending commit)
+
+mos> diff Config=eth0
+Changes in ConfigRoot=configmo_test,Directory=network,Config=eth0:
+
+  .network.ethernets.eth0.addresses[0]
+    Old: 192.168.1.10/24
+    New: 192.168.1.20/24
+
+mos> commit Config=eth0
+✓ Committed 1 MO(s)
+
+mos> lga Config=eth0
++---------------------+--------+-----------+---------------------------+--------------------------------+-------------------+
+| Timestamp           | User   | Operation | MO                        | Attribute                      | Changes           |
++---------------------+--------+-----------+---------------------------+--------------------------------+-------------------+
+| 2024-01-15 10:30:01 | user   | SET       | ConfigRoot=...,Config=eth0| network.ethernets.eth0.add...  | 192.168.1.10/24 →|
+|                     |        |           |                           |                                | 192.168.1.20/24  |
+| 2024-01-15 10:30:15 | user   | COMMIT    | ConfigRoot=...,Config=eth0| network.ethernets.eth0.add...  | 192.168.1.10/24 →|
+|                     |        |           |                           |                                | 192.168.1.20/24  |
++---------------------+--------+-----------+---------------------------+--------------------------------+-------------------+
+🎨 Formatos Soportados
+YAML (.yaml, .yml)
+JSON (.json)
+INI (.ini, .conf, .cfg)
+Text (.txt, .config)
+📊 Características
+✅ Jerarquía MOS completa (FDN)
+✅ Notación de puntos para atributos
+✅ Modificación transaccional (set → diff → commit)
+✅ Auditoría completa (LGA)
+✅ Rollback de cambios
+✅ Múltiples formatos de archivo
+✅ Búsqueda por patrones
+✅ Vista jerárquica
+
+🔧 Variables de Entorno
+Bash
+
+export CONFIGMO_ROOT=/path/to/configs    # Directorio raíz
+export USER=admin                        # Usuario para auditoría
+📝 Licencia
+MIT License
+
+text
+
+
+### 17. Script de prueba rápida: `test_configmo.sh`
+
+```bash
+#!/bin/bash
+
+# Script de prueba rápida para ConfigMO
+
+echo "=== ConfigMO Quick Test ==="
+echo ""
+
+# Crear estructura de prueba
+echo "Creating test structure..."
+TEST_DIR="/tmp/configmo_test"
+rm -rf $TEST_DIR
+mkdir -p $TEST_DIR/{network,services,apps}
+
+# Archivo YAML
+cat > $TEST_DIR/network/eth0.yaml <<EOF
+network:
+  ethernets:
+    eth0:
+      addresses:
+        - 192.168.1.10/24
+      gateway4: 192.168.1.1
+      nameservers:
+        addresses:
+          - 8.8.8.8
+          - 8.8.4.4
+EOF
+
+# Archivo JSON
+cat > $TEST_DIR/apps/myapp.json <<EOF
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8080
+  },
+  "database": {
+    "host": "localhost",
+    "port": 5432,
+    "name": "mydb"
+  }
+}
+EOF
+
+# Archivo INI
+cat > $TEST_DIR/services/nginx.conf <<EOF
+[server]
+listen = 80
+server_name = localhost
+
+[location]
+root = /var/www/html
+index = index.html
+EOF
+
+echo "✓ Test structure created at $TEST_DIR"
+echo ""
+echo "Files created:"
+find $TEST_DIR -type f
+echo ""
+echo "To test ConfigMO, run:"
+echo "  configmo $TEST_DIR"
+echo ""
+echo "Or use Python directly:"
+echo "  python -m configmo.cli.mos_shell $TEST_DIR"
+🚀 Instrucciones de Uso
+Instalar el proyecto:
+Bash
+
+# Guardar todos los archivos en la estructura correcta
+cd configmo
+pip install -r requirements.txt
+pip install -e .
+Crear estructura de prueba:
+Bash
+
+chmod +x test_configmo.sh
+./test_configmo.sh
+Ejecutar ConfigMO:
+Bash
+
+configmo /tmp/configmo_test
+Probar comandos:
+Bash
+
+mos> lt all
+mos> lh
+mos> get Config=eth0
+mos> set Config=myapp server.port 9000
+mos> pending
+mos> commit
+mos> lga
+Este sistema implementa completamente la filosofía MOShell para gestión de configuraciones Linux con:
+
+✅ Jerarquía de MOs completa
+✅ FDN (Full Distinguished Name)
+✅ Notación de puntos para atributos
+✅ Comandos lt, lh, get, set, pr
+✅ Sistema transaccional (pending, diff, commit, rollback)
+✅ Auditoría LGA completa
+✅ Soporte múltiples formatos
+✅ Formateo estilo MOShell

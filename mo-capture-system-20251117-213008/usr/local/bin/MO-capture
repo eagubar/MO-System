@@ -1,0 +1,187 @@
+#!/bin/bash
+# MO-capture v2.1 - Con milisegundos para IDs únicos
+
+VERSION="2.1-devuan"
+SNAPSHOT_DIR="/var/lib/MO-capture/snapshots"
+TEMPLATE_DIR="/var/lib/MO-capture/templates"
+LOG_FILE="/var/log/MO-capture.log"
+
+# Función para timestamp con milisegundos
+get_timestamp() {
+    date +%Y%m%d-%H%M%S-%3N
+}
+
+log() {
+    local message="$1"
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "[$timestamp] $message" >> "$LOG_FILE"
+}
+
+log_visible() {
+    local message="$1"
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "[$timestamp] $message" | tee -a "$LOG_FILE"
+}
+
+create_snapshot() {
+    local name="$1"
+    local snapshot_id="MO-snap-$(get_timestamp)"
+    
+    log "MO-capture: Creando snapshot: $snapshot_id - $name"
+    
+    local snapshot_path="$SNAPSHOT_DIR/$snapshot_id"
+    mkdir -p "$snapshot_path"
+    
+    find /usr/local /etc /opt -type f 2>/dev/null | head -1000 > "$snapshot_path/files.txt" 2>/dev/null
+    dpkg -l > "$snapshot_path/packages.txt" 2>/dev/null || true
+    
+    echo "$snapshot_id"
+}
+
+capture_command() {
+    local cmd="$1"
+    shift
+    local args=("$@")
+    
+    log_visible "MO-capture: Iniciando captura para: $cmd ${args[*]}"
+    
+    local pre_snapshot
+    pre_snapshot=$(create_snapshot "pre-$cmd")
+    log "MO-capture: Snapshot pre: $pre_snapshot"
+    
+    local exit_code=0
+    local strace_log="/tmp/MO-strace-$$.log"
+    
+    if command -v "$cmd" >/dev/null 2>&1; then
+        log "MO-capture: Ejecutando: $cmd ${args[*]}"
+        strace -f -e trace=file,chmod,chown -o "$strace_log" "$cmd" "${args[@]}"
+        exit_code=$?
+    else
+        log_visible "MO-capture ERROR: Comando no encontrado: $cmd"
+        return 1
+    fi
+    
+    local post_snapshot
+    post_snapshot=$(create_snapshot "post-$cmd")
+    log "MO-capture: Snapshot post: $post_snapshot"
+    
+    generate_template "$pre_snapshot" "$post_snapshot" "$cmd" "$strace_log"
+    
+    rm -f "$strace_log" 2>/dev/null
+    
+    log_visible "MO-capture: Captura completada: $pre_snapshot -> $post_snapshot"
+    return $exit_code
+}
+
+generate_template() {
+    local pre="$1"
+    local post="$2"
+    local cmd="$3"
+    local strace_log="$4"
+    
+    local template_file="$TEMPLATE_DIR/MO-template-${post}.json"
+    
+    create_basic_template "$template_file" "$pre" "$post" "$cmd"
+    
+    log "MO-capture: Template generado: $template_file"
+    log_visible "MO-capture: Template creado: $(basename "$template_file")"
+}
+
+create_basic_template() {
+    local template_file="$1"
+    local pre="$2"
+    local post="$3"
+    local cmd="$4"
+    
+    cat > "$template_file" << TEMPLATE_EOF
+{
+  "MO_template": {
+    "version": "2.1",
+    "system": "Devuan13-LXC",
+    "timestamp": "$(date -Iseconds)",
+    "command": "$cmd",
+    "snapshots": {
+      "pre": "$pre",
+      "post": "$post"
+    }
+  },
+  "files_created": [],
+  "directories_created": [],
+  "summary": {
+    "files_created": 0,
+    "directories_created": 0
+  }
+}
+TEMPLATE_EOF
+}
+
+case "${1:-}" in
+    "apt-get"|"apt")
+        shift
+        capture_command "apt-get" "$@"
+        ;;
+    "dpkg")
+        shift
+        capture_command "dpkg" "$@"
+        ;;
+    "make")
+        shift
+        capture_command "make" "$@"
+        ;;
+    "pip"|"pip3")
+        capture_command "$@"
+        ;;
+    "version")
+        echo "MO-capture v$VERSION - Devuan 13 LXC"
+        ;;
+    "list-snapshots")
+        echo "=== MO-capture Snapshots ==="
+        ls -1 "$SNAPSHOT_DIR" 2>/dev/null | head -10 || echo "No hay snapshots"
+        ;;
+    "list-templates")
+        echo "=== MO-capture Templates ==="
+        ls -1 "$TEMPLATE_DIR"/*.json 2>/dev/null | head -10 || echo "No hay templates"
+        ;;
+    "status")
+        echo "=== MO-capture Status ==="
+        echo "Version: $VERSION"
+        echo "Snapshots: $(ls -1 "$SNAPSHOT_DIR" 2>/dev/null | wc -l)"
+        echo "Templates: $(ls -1 "$TEMPLATE_DIR"/*.json 2>/dev/null 2>/dev/null | wc -l)"
+        echo "Log: $LOG_FILE"
+        ;;
+    "cleanup")
+        echo "=== MO-capture Cleanup ==="
+        find /tmp -name "MO-strace-*.log" -delete 2>/dev/null
+        echo "Archivos temporales limpiados"
+        ;;
+    "reset")
+        echo "=== MO-capture Reset ==="
+        rm -rf "$SNAPSHOT_DIR"/* 2>/dev/null
+        rm -rf "$TEMPLATE_DIR"/* 2>/dev/null
+        echo "Snapshots y templates eliminados"
+        ;;
+    *)
+        echo "MO-capture - Sistema de captura de instalaciones v$VERSION"
+        echo ""
+        echo "Uso: MO-capture <comando> [args...]"
+        echo ""
+        echo "Comandos de instalación:"
+        echo "  apt-get install <paquete>"
+        echo "  apt install <paquete>" 
+        echo "  dpkg <opciones>"
+        echo "  make install"
+        echo "  pip install <paquete>"
+        echo ""
+        echo "Comandos del sistema:"
+        echo "  version      - Mostrar versión"
+        echo "  status       - Estado del sistema"
+        echo "  list-snapshots - Listar snapshots"
+        echo "  list-templates - Listar templates"
+        echo "  cleanup      - Limpiar archivos temporales"
+        echo "  reset        - Eliminar todos los snapshots y templates"
+        echo ""
+        echo "Ejemplos:"
+        echo "  MO-capture apt-get install -y nginx"
+        echo "  MO-capture make install"
+        ;;
+esac
