@@ -1,4 +1,4 @@
-MO-capture - Sistema de Captura Declarativa para Linux
+# MO-capture - Sistema de Captura Declarativa para Linux
 📋 Tabla de Contenidos
 Visión General
 
