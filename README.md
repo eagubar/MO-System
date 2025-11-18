@@ -1,448 +1,931 @@
-# MO-capture - Sistema de Captura Declarativa para Linux
-📋 Tabla de Contenidos
-Visión General
 
-Arquitectura del Sistema
+# MO-mos v2.0 - Sistema de Managed Objects para Linux
 
-Instalación y Configuración
+![Version](https://img.shields.io/badge/version-2.0.0-blue)
+![Status](https://img.shields.io/badge/status-production-green)
+![Python](https://img.shields.io/badge/python-3.8+-yellow)
+![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
-Árbol de Componentes
+## 📋 Tabla de Contenidos
 
-Comandos y Funcionalidades
+- [Descripción](#-descripción)
+- [Características](#-características)
+- [Arquitectura](#-arquitectura)
+- [Instalación](#-instalación)
+- [Inicio Rápido](#-inicio-rápido)
+- [Comandos Disponibles](#-comandos-disponibles)
+- [Flujos de Trabajo](#-flujos-de-trabajo)
+- [Ejemplos Avanzados](#-ejemplos-avanzados)
+- [Integración con MO-capture](#-integración-con-mo-capture)
+- [Configuración](#-configuración)
+- [Troubleshooting](#-troubleshooting)
+- [Roadmap](#-roadmap)
+- [Contribuir](#-contribuir)
 
-Flujo de Trabajo
+---
 
-Formatos y Estructuras
+## 🎯 Descripción
 
-Mecanismos Internos
+**MO-mos** es un sistema de gestión de configuraciones basado en el concepto de **Managed Objects (MO)** inspirado en MOShell de Ericsson, adaptado para el filesystem de Linux.
 
-Mantenimiento
+### ¿Qué es un Managed Object?
 
-Solución de Problemas
+Un **Managed Object (MO)** es una representación estructurada de:
+- Archivos de configuración (YAML, JSON, INI, texto)
+- Directorios del sistema
+- Sus atributos y metadatos
 
-🔍 Visión General
-MO-capture es un sistema de captura declarativa que intercepta instalaciones tradicionales de software en Linux y genera templates JSON reproducibles. Transforma instalaciones imperativas (./configure && make && make install) en definiciones declarativas.
+Cada MO tiene:
+- **FDN (Full Distinguished Name)**: `ConfigRoot=/,Directory=etc,Config=nginx`
+- **Proxy ID / MO ID**: Identificador único como `Config=nginx`
+- **Atributos**: Propiedades parseadas del contenido
+- **Estado**: SYNC, MODIFIED, PENDING, ERROR
+- **Control de acceso**: Read-Only (RO) o Read-Write (RW)
 
-Filosofía de Diseño
+### Filosofía MOShell
+
+MO-mos implementa la filosofía de MOShell:
+1. **Exploración jerárquica** de configuraciones
+2. **Modificación transaccional** (set → pending → diff → commit)
+3. **Auditoría completa** (Log & Audit)
+4. **Rollback** de cambios
+5. **Control de versiones** implícito
+
+---
+
+## ✨ Características
+
+### 🎯 Core Features
+
+✅ **Arquitectura Modular Híbrida**
+- 6 módulos especializados: models, parsers, core, cli, utils
+- Integración con MO-capture existente
+- Extensible y mantenible
+
+✅ **Sistema de Tipos Completo**
+```python
+MOType: ConfigRoot, Directory, Config, Service, etc.
+AttributeType: String, Integer, Float, Boolean, List, Dict, IP, Path
+AttributeAccess: RO (Read-Only), RW (Read-Write)
+MOStatus: SYNC, MODIFIED, PENDING, ERROR
+✅ Parsers Inteligentes
+
+YAML (.yaml, .yml) - Completo
+JSON (.json) - Completo
+INI (.ini, .conf, .cfg) - Completo
+Text (key=value) - Completo
+Auto-detección de formato
+Preservación de estructura
+✅ Operaciones Transaccionales
+
+Bash
+
+set    → Modificar valor (queda en pending)
+pending → Ver cambios no confirmados
+diff   → Ver diferencias
+commit → Escribir a disco
+rollback → Revertir cambios
+✅ Sistema de Auditoría (LGA)
+
+Log completo de operaciones
+Filtrado por usuario, MO, operación, fecha
+Persistente en JSON
+Formato tabla o texto
+✅ Persistencia de Estado
+
+Cambios pendientes sobreviven entre sesiones
+Archivo: /var/lib/MO-capture/pending_changes.json
+Sincronización automática
+✅ Jerarquía MOS Completa
+
 text
-Instalación Tradicional          MO-capture
-     ↓                              ↓
-Comandos imperativos        →   Templates declarativos
-Cambios opacos              →   Cambios documentados
-Instalación única           →   Replicabilidad infinita
-Configuración manual        →   Configuración versionada
-🏗️ Arquitectura del Sistema
-Componentes Principales
+
+ConfigRoot=/
+├── Directory=etc
+│   ├── Config=nginx.conf
+│   │   ├── .server.port = 80
+│   │   ├── .server.host = localhost
+│   │   └── .worker_processes = 4
+│   └── Directory=ssh
+│       └── Config=sshd_config
+│           └── .Port = 22
+└── Directory=opt
+    └── AppConfig=myapp
+        └── Config=settings.yaml
+✅ Shell Interactivo
+
+Comandos estilo MOShell
+Tab completion (en desarrollo)
+History
+Help integrado
+✅ Formateo Flexible
+
+Texto plano (por defecto)
+Tablas (con flexible_table)
+JSON export (en desarrollo)
+🏗️ Arquitectura
+Estructura de Directorios
 text
-MO-capture Core
-├── Interceptor de Comandos
-├── Sistema de Snapshots  
-├── Generador de Templates
-├── Motor de Logging
-└── Gestor de Estado
-Flujo Arquitectónico
 
+/usr/local/
+├── bin/
+│   └── MO-mos                    # Ejecutable principal
+└── lib/MO-capture/
+    ├── mos/                      # Código modular nuevo
+    │   ├── __init__.py
+    │   ├── models/               # Tipos, MO, Attribute
+    │   │   ├── __init__.py
+    │   │   ├── types.py
+    │   │   ├── attribute.py
+    │   │   └── mo.py
+    │   ├── parsers/              # Parsers de archivos
+    │   │   ├── __init__.py
+    │   │   ├── base_parser.py
+    │   │   ├── yaml_parser.py
+    │   │   ├── json_parser.py
+    │   │   ├── ini_parser.py
+    │   │   └── text_parser.py
+    │   ├── core/                 # Lógica de negocio
+    │   │   ├── __init__.py
+    │   │   ├── manager.py        # Gestión de MOs
+    │   │   ├── operations.py     # SET/COMMIT/ROLLBACK
+    │   │   └── audit.py          # Sistema LGA
+    │   ├── cli/                  # Interfaz de usuario
+    │   │   ├── __init__.py
+    │   │   ├── shell.py          # Shell interactivo
+    │   │   └── commands.py       # Implementación comandos
+    │   └── utils/                # Utilidades
+    │       ├── __init__.py
+    │       ├── formatters.py     # Formateo de salida
+    │       ├── validators.py     # Validaciones
+    │       └── table_wrapper.py  # Integración tablas
+    ├── mos_core.py               # Wrapper legacy
+    ├── mos_manager.py            # Wrapper legacy
+    ├── mos_shell.py              # Wrapper legacy
+    ├── flexible_table.py         # Sistema de tablas (MO-capture)
+    └── [otros archivos MO-capture]
 
-
-
-
-
-
-
-📥 Instalación y Configuración
-Requisitos del Sistema
-bash
-# Sistema operativo
-Distribución: Devuan 13/Debian-based
-Kernel: Linux 6.14.11-4-pve
-Arquitectura: x86_64
-
-# Dependencias
-python3 (3.13.5+)
-strace (6.13+)
-inotify-tools
-sqlite3
-jq (1.7+)
-build-essential
-Instalación Automática
-bash
-# Descargar e instalar
-wget -O - https://raw.githubusercontent.com/tu-repo/mo-capture/main/install.sh | bash
-
-# O instalación manual
-git clone https://github.com/tu-repo/mo-capture.git
-cd mo-capture
-sudo ./install.sh
-Estructura de Instalación
-text
-/
-├── etc/MO-capture/
-│   ├── config.yaml              # Configuración principal
-│   └── templates/               # Plantillas base
-├── usr/local/bin/
-│   ├── MO-capture              # Ejecutable principal
-│   └── MO-install              # Instalador desde templates
-├── usr/local/lib/MO-capture/
-│   └── template-generator.py   # Motor de generación
-└── var/lib/MO-capture/
-    ├── snapshots/              # Snapshots del sistema
-    ├── templates/              # Templates generados
-    └── database.db            # Base de datos (futuro)
-🌳 Árbol de Componentes
-Núcleo del Sistema
-text
-MO-capture v2.1
-├── Binarios Ejecutables
-│   ├── /usr/local/bin/MO-capture
-│   └── /usr/local/bin/MO-install
-├── Librerías y Módulos
-│   └── /usr/local/lib/MO-capture/template-generator.py
-├── Configuración
-│   └── /etc/MO-capture/config.yaml
-├── Datos del Sistema
-│   ├── /var/lib/MO-capture/snapshots/
-│   ├── /var/lib/MO-capture/templates/
-│   └── /var/log/MO-capture.log
-└── Scripts de Soporte
-    ├── /root/MO-test-*.sh
-    └── /root/mo-capture-backup.sh
-Estructura de Directorios de Datos
-text
 /var/lib/MO-capture/
-├── snapshots/
-│   ├── MO-snap-20251117-203300-622/
-│   │   ├── files.txt          # Lista de archivos del sistema
-│   │   ├── packages.txt       # Paquetes instalados (dpkg -l)
-│   │   └── services.txt       # Servicios systemd
-│   └── MO-snap-20251117-203301-100/
-│       └── ...
-├── templates/
-│   ├── MO-template-MO-snap-20251117-203301-100.json
-│   ├── MO-template-MO-snap-20251117-203301-156.json
-│   └── ...
-└── database.db                # Base de datos SQLite (futuro)
-🎯 Comandos y Funcionalidades
-Comandos Principales
-Captura de Instalaciones
-bash
-# Capturar instalación de paquetes APT
-MO-capture apt-get install -y <paquete>
+├── pending_changes.json          # Cambios pendientes
+├── audit.log                     # Log de auditoría
+├── templates/                    # Templates MO-capture
+└── snapshots/                    # Snapshots MO-capture
+Diagrama de Componentes
+text
 
-# Capturar instalación desde fuente
-MO-capture make install
+┌─────────────────────────────────────────────────────────┐
+│                    MO-mos CLI                           │
+│  (Ejecutable /usr/local/bin/MO-mos)                    │
+└────────────────────┬────────────────────────────────────┘
+                     │
+         ┌───────────┴───────────┐
+         │                       │
+    ┌────▼────┐          ┌──────▼──────┐
+    │  Shell  │          │  Commands   │
+    │  (cmd)  │          │  (one-shot) │
+    └────┬────┘          └──────┬──────┘
+         │                      │
+         └──────────┬───────────┘
+                    │
+         ┌──────────▼──────────┐
+         │   MOSCommands       │
+         │  (Comandos MOS)     │
+         └──────────┬──────────┘
+                    │
+    ┌───────────────┼───────────────┐
+    │               │               │
+┌───▼────┐    ┌────▼─────┐   ┌────▼────┐
+│Manager │    │Operations│   │  Audit  │
+│(Scan)  │    │(SET/COMMIT)  │  (LGA)  │
+└───┬────┘    └────┬─────┘   └────┬────┘
+    │              │              │
+    │         ┌────▼────┐         │
+    │         │ Parsers │         │
+    │         │(YAML/..)|         │
+    │         └────┬────┘         │
+    │              │              │
+    └──────────────┼──────────────┘
+                   │
+            ┌──────▼──────┐
+            │ Filesystem  │
+            │ (/etc, /opt)│
+            └─────────────┘
+Flujo de Datos
+text
 
-# Capturar instalación Python
-MO-capture pip3 install <paquete>
+1. ESCANEO:
+   Filesystem → Manager → Parsers → MOs + Attributes
 
-# Capturar instalación DPkg
-MO-capture dpkg -i <paquete.deb>
-Gestión del Sistema
-bash
-# Información del sistema
-MO-capture version                    # Versión de MO-capture
-MO-capture status                     # Estado general del sistema
+2. MODIFICACIÓN:
+   set → Attribute.value → pending_changes.json
+   
+3. COMMIT:
+   pending_changes.json → Parsers → Filesystem
+   
+4. AUDITORÍA:
+   Operaciones → audit.log → LGA queries
+🚀 Instalación
+Requisitos
+Python 3.8 o superior
+Sistema Linux (Debian, Ubuntu, etc.)
+Permisos de root/sudo
+Dependencias
+Bash
 
-# Gestión de datos
-MO-capture list-snapshots            # Listar snapshots existentes
-MO-capture list-templates            # Listar templates generados
-MO-capture cleanup                   # Limpiar archivos temporales
-MO-capture reset                     # Eliminar todos los snapshots y templates
-MO-install (Instalación desde Templates)
-bash
-# Verificar template
-MO-install --verify <template.json>
+# Instalación de dependencias Python
+pip3 install PyYAML
 
-# Información del template
-MO-install --info <template.json>
+# O usando apt (Debian/Ubuntu)
+apt-get install python3-yaml
+Verificación
+Bash
 
-# Instalar desde template (futuro)
-MO-install <template.json>
-Comandos de Diagnóstico
-bash
-# Ver logs del sistema
-tail -f /var/log/MO-capture.log
+# Verificar instalación
+MO-mos version
 
-# Verificar integridad de instalación
-ls -la /usr/local/bin/MO-*
-ls -la /var/lib/MO-capture/
+# Verificar componentes
+MO-mos stats
 
-# Probar funcionamiento básico
-MO-capture apt-get install -y htop
-MO-capture list-templates
-🔄 Flujo de Trabajo
-Flujo de Captura Estándar
-bash
-# 1. Iniciar captura (implícito)
-MO-capture apt-get install -y nginx
+# Verificar parsers
+python3 -c "import yaml; print('✓ PyYAML instalado')"
+🎮 Inicio Rápido
+1. Primer Escaneo
+Bash
 
-# 2. Proceso automático:
-#    - Crear snapshot pre-instalación
-#    - Ejecutar comando con strace
-#    - Crear snapshot post-instalación  
-#    - Analizar diferencias
-#    - Generar template JSON
+# Escanear el sistema
+MO-mos scan
 
-# 3. Ver resultados
-MO-capture list-templates
-MO-install --info /var/lib/MO-capture/templates/MO-template-*.json
-Flujo de Instalación desde Fuente
-bash
-# 1. Descargar y preparar código
-wget http://example.com/app-1.0.tar.gz
-tar -xzf app-1.0.tar.gz
-cd app-1.0
-
-# 2. Configurar y compilar
-./configure --prefix=/usr/local
-make
-
-# 3. Instalar con captura
-MO-capture make install
-
-# 4. Verificar instalación
-MO-capture status
-find /usr/local -name "*app*"
-📊 Formatos y Estructuras
-Estructura de Template JSON
-json
-{
-  "MO_template": {
-    "version": "2.1",
-    "system": "Devuan13-LXC",
-    "timestamp": "2025-11-17T20:33:01+00:00",
-    "command": "apt-get",
-    "arguments": "install -y nginx",
-    "snapshots": {
-      "pre": "MO-snap-20251117-203300-622",
-      "post": "MO-snap-20251117-203301-100"
-    },
-    "generator": "MO-capture"
-  },
-  "operations": {
-    "files_created": [
-      {
-        "path": "/usr/sbin/nginx",
-        "size": 1024000,
-        "permissions": "755",
-        "hash": "abc123def456...",
-        "owner": "0:0",
-        "modified": 1731877981
-      }
-    ],
-    "directories_created": [
-      "/etc/nginx",
-      "/var/log/nginx"
-    ],
-    "permissions_changed": [
-      "/usr/sbin/nginx"
-    ]
-  },
-  "summary": {
-    "total_files_created": 15,
-    "total_directories_created": 3,
-    "total_permissions_changed": 2
-  },
-  "metadata": {
-    "strace_log": "/tmp/MO-strace-12345.log",
-    "analysis_method": "strace_and_snapshot",
-    "template_version": "2.1"
-  }
-}
-Estructura de Snapshots
-Cada snapshot contiene:
+# Ver estadísticas
+MO-mos stats
+Output esperado:
 
 text
-MO-snap-YYYYMMDD-HHMMSS-SSS/
-├── files.txt          # find /usr/local /etc /opt -type f
-├── packages.txt       # dpkg -l
-└── services.txt       # systemctl list-unit-files
-Configuración del Sistema (/etc/MO-capture/config.yaml)
-yaml
-version: "2.1"
-system: "Devuan13-LXC"
 
-# Directorios monitoreados
-capture_directories:
-  - /usr/local
-  - /etc
-  - /opt
-  - /var/lib
+╔══════════════════════════════════════════════════╗
+║               MOS System Statistics              ║
+╠══════════════════════════════════════════════════╣
+║ Total MOs:                                   264 ║
+║ Total Attributes:                           2957 ║
+║ Config Files:                                 75 ║
+║ Directories:                                 158 ║
+╚══════════════════════════════════════════════════╝
+2. Explorar Configuraciones
+Bash
 
-# Patrones ignorados
-ignore_patterns:
-  - "*.log"
-  - "*.tmp"
-  - "*.cache"
-  - "/tmp/*"
-  - "/var/tmp/*"
-  - "/dev/*"
+# Listar todos los MOs
+MO-mos lt
 
-# Comandos interceptados
-intercepted_commands:
-  - apt-get
-  - apt
-  - dpkg
-  - make
-  - pip
-  - pip3
+# Listar en tabla
+MO-mos ltt
 
-# Configuración de logging
-logging:
-  level: "INFO"
-  file: "/var/log/MO-capture.log"
-  max_size: "10MB"
+# Buscar configuraciones
+MO-mos search nginx
+MO-mos search network
+3. Ver Contenido
+Bash
 
-# Configuración de snapshots
-snapshots:
-  max_count: 50
-  auto_cleanup: true
-⚙️ Mecanismos Internos
-Sistema de Interceptación
-MO-capture utiliza múltiples estrategias para capturar instalaciones:
+# Ver configuración completa
+MO-mos get "Config=nginx"
 
-bash
-# 1. Wrapper de comandos
-alias apt-get="MO-capture apt-get"
-alias make="MO-capture make"
+# Ver atributo específico
+MO-mos get "Config=nginx" server.port
 
-# 2. Interceptación con strace
-strace -f -e trace=file,chmod,chown -o /tmp/MO-strace-$$.log <comando>
+# Vista detallada
+MO-mos pr "Config=nginx"
+4. Modificar Configuración
+Bash
 
-# 3. Análisis de syscalls
-#    - open, openat (creación de archivos)
-#    - chmod, fchmod (cambios de permisos)
-#    - mkdir (creación de directorios)
-Sistema de Snapshots
-python
-# Algoritmo de creación de snapshots
-def create_snapshot(name):
-    snapshot_id = f"MO-snap-{timestamp_con_milisegundos}"
+# Cambiar valor
+MO-mos set "Config=nginx" server.port 8080
+
+# Ver cambios pendientes
+MO-mos pending
+
+# Ver diferencias
+MO-mos diff "Config=nginx"
+
+# Confirmar cambios
+MO-mos commit "Config=nginx"
+
+# O revertir
+MO-mos rollback "Config=nginx"
+5. Auditoría
+Bash
+
+# Ver últimas operaciones
+MO-mos lga --limit 10
+
+# Ver en tabla
+MO-mos lgat --limit 10
+
+# Filtrar por MO
+MO-mos lga "Config=nginx"
+
+# Filtrar por usuario
+MO-mos lga --user admin
+📋 Comandos Disponibles
+Navegación
+Comando	Descripción	Ejemplo
+lt [pattern]	Contar MOs	MO-mos lt, MO-mos lt Config=*
+ltt [pattern]	Listar MOs en tabla	MO-mos ltt, MO-mos ltt *nginx*
+lh [pattern]	Vista jerárquica	MO-mos lh, MO-mos lh Directory=etc
+get <fdn> [attr]	Ver atributos	MO-mos get Config=nginx
+pr <fdn>	Vista detallada	MO-mos pr Config=nginx
+search <term>	Buscar MOs	MO-mos search network
+Modificación
+Comando	Descripción	Ejemplo
+set <fdn> <attr> <val>	Cambiar valor	MO-mos set Config=app port 8080
+pending	Ver cambios pendientes	MO-mos pending
+diff <fdn>	Ver diferencias	MO-mos diff Config=app
+commit [fdn]	Confirmar cambios	MO-mos commit
+rollback <fdn>	Revertir cambios	MO-mos rollback Config=app
+Auditoría
+Comando	Descripción	Ejemplo
+lga [options]	Ver log de auditoría	MO-mos lga --limit 20
+lgat [options]	Log en tabla	MO-mos lgat --limit 10
+Filtros:	
+--user <user>	MO-mos lga --user admin
+--limit <n>	MO-mos lga --limit 50
+Administración
+Comando	Descripción	Ejemplo
+scan	Re-escanear filesystem	MO-mos scan
+reload <fdn>	Recargar desde disco	MO-mos reload Config=nginx
+stats	Estadísticas del sistema	MO-mos stats
+version	Ver versión	MO-mos version
+Shell Interactivo
+Comando	Descripción
+MO-mos	Iniciar shell
+help	Ayuda general
+help <cmd>	Ayuda de comando
+exit o Ctrl+D	Salir
+🔄 Flujos de Trabajo
+Flujo 1: Cambiar Puerto de Aplicación
+Bash
+
+# 1. Ver configuración actual
+MO-mos get "Config=myapp" server.port
+# Output: .server.port = 3000
+
+# 2. Cambiar puerto
+MO-mos set "Config=myapp" server.port 8080
+# Output: ✓ Attribute updated (pending commit)
+
+# 3. Verificar cambio (aún no escrito)
+MO-mos diff "Config=myapp"
+# Output:
+# Changes in ConfigRoot=/,AppConfig=app,Config=myapp:
+# ============================================================
+#   .server.port
+#     Old: 3000
+#     New: 8080
+
+# 4. Confirmar
+MO-mos commit "Config=myapp"
+# Output: ✓ Committed 1 MO(s)
+
+# 5. Verificar en archivo
+grep port /path/to/myapp.yaml
+# Output: port: 8080
+Flujo 2: Modificación Masiva
+Bash
+
+# 1. Cambiar debug en todos los configs
+MO-mos set "Config=*" debug true
+# Output: ✓ Attribute updated in 5 MOs (pending commit)
+
+# 2. Ver todos los cambios pendientes
+MO-mos pending
+# Output:
+# Pending Changes:
+# ============================================================
+# MO: ConfigRoot=/,Config=app1
+#   .debug: false → true
+# MO: ConfigRoot=/,Config=app2
+#   .debug: false → true
+# ...
+
+# 3. Confirmar todos
+MO-mos commit
+# Output: ✓ Committed 5 MO(s)
+Flujo 3: Exploración y Debugging
+Bash
+
+# 1. Buscar configuraciones de red
+MO-mos search network
+
+# 2. Ver jerarquía
+MO-mos lh NetworkConfig=network
+
+# 3. Inspeccionar detalle
+MO-mos pr Config=eth0
+
+# 4. Ver solo IPs
+MO-mos get "Config=eth0" "*address*"
+Flujo 4: Rollback de Error
+Bash
+
+# 1. Cambio accidental
+MO-mos set "Config=database" host "wrong-host"
+
+# 2. Detectar error
+MO-mos diff "Config=database"
+# Output: .host: "correct-host" → "wrong-host"
+
+# 3. Revertir ANTES de commit
+MO-mos rollback "Config=database"
+# Output: ✓ Rolled back 1 MO(s)
+
+# 4. Verificar
+MO-mos pending
+# Output: No pending changes.
+Flujo 5: Auditoría Post-Cambio
+Bash
+
+# 1. Ver últimos cambios
+MO-mos lgat --limit 10
+
+# 2. Investigar cambio específico
+MO-mos lga "Config=nginx"
+
+# 3. Ver quién hizo cambios
+MO-mos lga --user john
+
+# 4. Filtrar por operación
+MO-mos lga --operation COMMIT
+🔬 Ejemplos Avanzados
+Ejemplo 1: Script de Migración
+Bash
+
+#!/bin/bash
+# Migrar puertos de 8080 a 9000
+
+echo "Buscando configs con puerto 8080..."
+MO-mos search 8080
+
+# Cambiar en todos los encontrados
+for config in $(MO-mos search 8080 | grep "Config=" | awk '{print $1}'); do
+    echo "Procesando $config..."
+    MO-mos set "$config" server.port 9000
+done
+
+# Revisar cambios
+MO-mos pending
+
+# Confirmar
+read -p "¿Confirmar cambios? (y/n) " -n 1 -r
+echo
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+    MO-mos commit
+    echo "✓ Migración completada"
+fi
+Ejemplo 2: Backup Antes de Cambios
+Bash
+
+#!/bin/bash
+# Backup automático antes de commit
+
+CONFIG_FDN="Config=nginx"
+
+# Crear backup
+BACKUP_DIR="/var/backups/mo-mos"
+mkdir -p "$BACKUP_DIR"
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+
+# Exportar estado actual
+MO-mos get "$CONFIG_FDN" > "$BACKUP_DIR/${CONFIG_FDN}_${TIMESTAMP}.backup"
+
+# Hacer cambio
+MO-mos set "$CONFIG_FDN" worker_processes 8
+
+# Diff
+MO-mos diff "$CONFIG_FDN"
+
+# Commit
+MO-mos commit "$CONFIG_FDN"
+
+echo "✓ Backup guardado en: $BACKUP_DIR/${CONFIG_FDN}_${TIMESTAMP}.backup"
+Ejemplo 3: Validación Pre-Commit
+Bash
+
+#!/bin/bash
+# Validar sintaxis antes de commit
+
+CONFIG_FILE="/etc/nginx/nginx.conf"
+
+# Ver cambios pendientes
+PENDING=$(MO-mos pending | grep "Config=nginx")
+
+if [ -n "$PENDING" ]; then
+    echo "Cambios pendientes detectados, validando..."
     
-    # Capturar estado del sistema de archivos
-    files = find(capture_directories).limit(1000)
+    # Commit temporal
+    MO-mos commit "Config=nginx"
     
-    # Capturar estado de paquetes
-    packages = dpkg_list()
-    
-    # Capturar estado de servicios
-    services = systemctl_list_unit_files()
-    
-    return snapshot_id
-Generación de Templates
-python
-# Proceso de generación de templates
-def generate_template(pre_snapshot, post_snapshot, command):
-    # Comparar snapshots
-    differences = compare_snapshots(pre_snapshot, post_snapshot)
-    
-    # Analizar log de strace
-    file_operations = parse_strace_log(strace_log)
-    
-    # Combinar información
-    template = {
-        "metadata": build_metadata(command),
-        "operations": merge_operations(differences, file_operations),
-        "summary": calculate_summary()
-    }
-    
-    return template
-🛠️ Mantenimiento
-Tareas de Mantenimiento Regular
-bash
-# Limpieza de archivos temporales
-MO-capture cleanup
+    # Validar sintaxis
+    if nginx -t; then
+        echo "✓ Validación exitosa"
+    else
+        echo "✗ Error de sintaxis, revirtiendo..."
+        # Restaurar desde backup
+        # (implementar lógica de restore)
+    fi
+fi
+Ejemplo 4: Monitoreo de Cambios
+Bash
 
-# Verificación de integridad
-MO-capture status
-ls -la /var/lib/MO-capture/snapshots | wc -l
-ls -la /var/lib/MO-capture/templates | wc -l
+#!/bin/bash
+# Monitorear cambios en tiempo real
 
-# Rotación de logs (si se implementa)
-logrotate /etc/logrotate.d/mo-capture
-Backup del Sistema
-bash
-# Backup completo del sistema MO-capture
-/root/mo-capture-backup.sh
+watch -n 5 '
+echo "=== PENDING CHANGES ==="
+MO-mos pending
 
-# El backup genera:
-# - mo-system-YYYYMMDD-HHMMSS.tar.gz
-# - Contiene todos los componentes del sistema
-# - Script de restauración incluido
-Monitoreo de Recursos
-bash
-# Ver uso de disco
-du -sh /var/lib/MO-capture/
+echo ""
+echo "=== RECENT AUDIT ==="
+MO-mos lgat --limit 5
+'
+🔗 Integración con MO-capture
+MO-mos se integra perfectamente con el sistema MO-capture existente:
 
-# Ver logs recientes
-tail -20 /var/log/MO-capture.log
+¿Qué es MO-capture?
+MO-capture es un sistema que:
 
-# Ver estado de servicios relacionados
-systemctl status systemd-journald  # Para strace
-🐛 Solución de Problemas
-Problemas Comunes y Soluciones
-Error: "Comando no encontrado"
-bash
-# Verificar que el comando existe
-which <comando>
+Intercepta comandos del sistema (apt, dpkg, make, pip)
+Captura cambios en el filesystem
+Genera templates y snapshots
+Usa flexible_table para visualización
+Flujo Integrado
+text
 
-# Usar ruta completa
-MO-capture /usr/bin/make install
-Error: "Permiso denegado"
-bash
-# Ejecutar con privilegios necesarios
-sudo MO-capture apt-get install -y <paquete>
-Snapshots con el mismo ID
-bash
-# Esto es normal en instalaciones rápidas
-# MO-capture v2.1+ usa milisegundos para diferenciar
-MO-snap-20251117-203300-622
-MO-snap-20251117-203301-100
-Logs de Strace muy grandes
-bash
-# Configurar límites en config.yaml
-strace:
-  max_log_size: "10MB"
-  trace_patterns: ["file", "chmod", "chown"]
-Diagnóstico Avanzado
-bash
-# Modo verbose temporal
-MO-capture --debug apt-get install -y <paquete>
+1. CAPTURA (MO-capture)
+   $ MO-capture apt-get install nginx
+   → Genera template-nginx.json
+   → Captura archivos creados/modificados
 
-# Ver logs en tiempo real
-tail -f /var/log/MO-capture.log
+2. GESTIÓN (MO-mos)
+   $ MO-mos scan
+   → Detecta nuevos archivos de nginx
+   → Parsea configuraciones
+   
+   $ MO-mos get "Config=nginx"
+   → Muestra atributos parseados
+   
+   $ MO-mos set "Config=nginx" worker_processes 8
+   $ MO-mos commit
+   → Modifica configuración
 
-# Probar componente específico
-python3 /usr/local/lib/MO-capture/template-generator.py --help
+3. AUDITORÍA (Ambos)
+   $ MO-mos lga "Config=nginx"
+   → Historial de cambios MO-mos
+   
+   $ MO-capture list-templates
+   → Templates de instalación
+Archivos Compartidos
+text
 
-# Verificar permisos
-ls -la /usr/local/bin/MO-* /var/lib/MO-capture/
-Reset Completo del Sistema
-bash
-# En caso de corrupción o problemas graves
-MO-capture reset
-rm -f /var/log/MO-capture.log
-systemctl daemon-reload  # Si se usan servicios
-🔮 Características Futuras (Roadmap)
-Próximas Versiones
-v2.2: Análisis de archivos de configuración integrado
+/var/lib/MO-capture/
+├── templates/           # MO-capture
+├── snapshots/          # MO-capture
+├── pending_changes.json # MO-mos
+└── audit.log           # MO-mos
+Ejemplo de Uso Combinado
+Bash
 
-v3.0: Base de datos SQLite para tracking
+# 1. Instalar con MO-capture
+MO-capture apt-get install -y postgresql
 
-v3.1: Sistema de rollback desde templates
+# 2. Ver template generado
+MO-capture show-template postgresql
 
-v3.5: Interfaz web de gestión
+# 3. Re-escanear con MO-mos
+MO-mos scan
 
-v4.0: Soporte multi-plataforma
+# 4. Gestionar configuración
+MO-mos search postgresql
+MO-mos get "Config=postgresql"
+MO-mos set "Config=postgresql" max_connections 200
+MO-mos commit
 
-Extensiones Planeadas
-bash
-# Análisis de configuraciones
-MO-analyze-config /etc/nginx/nginx.conf
+# 5. Ver historial completo
+MO-mos lga "Config=postgresql"
+⚙️ Configuración
+Variables de Entorno
+Bash
 
-# Gestión de dependencias
-MO-capture --with-dependencies apt-get install <paquete>
+# Usuario para auditoría
+export USER=admin
 
-# Exportación a otros formatos
-MO-capture --export dockerfile <template.json>
-MO-capture v2.1 - Sistema estable y listo para producción en entornos Devuan/Debian. Documentación completa y mecanismos de respaldo garantizan la confiabilidad del sistema.
+# Configurar en .bashrc o .profile
+echo 'export USER=admin' >> ~/.bashrc
+Directorios Escaneados
+Por defecto, MO-mos escanea:
 
+Python
+
+CONFIG_DIRS = [
+    "/etc",           # Configuraciones del sistema
+    "/usr/local/etc", # Configuraciones locales
+    "/opt",           # Software opcional
+    "/var/lib"        # Datos del sistema
+]
+Directorios Ignorados
+Python
+
+IGNORE_DIRS = {
+    '.git', '.svn', '__pycache__', 'node_modules',
+    '.cache', 'venv', 'env', '.venv', 'lost+found'
+}
+Profundidad de Escaneo
+Por defecto: 3 niveles
+
+Python
+
+# En mos/core/manager.py
+self._scan_directory(config_path, self.root_mo, depth=0, max_depth=3)
+Para cambiar:
+
+Python
+
+# Editar /usr/local/lib/MO-capture/mos/core/manager.py
+# Línea ~73: max_depth=3  →  max_depth=5
+🐛 Troubleshooting
+Problema: "No MOs found"
+Causa: Sistema no escaneado o directorio vacío
+
+Solución:
+
+Bash
+
+MO-mos scan
+MO-mos stats
+Problema: "Attribute is read-only"
+Causa: Intentar modificar atributo RO (metadatos)
+
+Solución:
+
+Bash
+
+# Ver qué atributos son RO
+MO-mos get "Config=myapp"
+# Buscar (RO) en la salida
+
+# Solo modificar atributos sin (RO)
+Problema: Cambios no se guardan
+Causa: Olvidaste hacer commit
+
+Solución:
+
+Bash
+
+MO-mos set "Config=app" port 8080
+MO-mos pending  # ← Verificar que esté pendiente
+MO-mos commit   # ← NECESARIO
+Problema: "Parser error"
+Causa: Archivo corrupto o formato no soportado
+
+Solución:
+
+Bash
+
+# Ver detalles del error
+MO-mos scan 2>&1 | grep -i error
+
+# Verificar archivo manualmente
+cat /path/to/file.yaml
+yamllint /path/to/file.yaml
+
+# Recargar
+MO-mos reload "Config=myfile"
+Problema: Tabla no se muestra bien
+Causa: flexible_table no disponible
+
+Solución:
+
+Bash
+
+# Instalar dependencias
+pip3 install PyYAML
+
+# Verificar
+python3 -c "from flexible_table import FlexibleTable"
+
+# Usar fallback
+MO-mos ltt  # Usa tabla simple si falla
+Problema: Permisos denegados
+Causa: Archivos de sistema requieren root
+
+Solución:
+
+Bash
+
+# Ejecutar como root
+sudo MO-mos scan
+sudo MO-mos set ...
+
+# O cambiar a root
+su -
+MO-mos scan
+🗺️ Roadmap
+✅ Implementado (v2.0)
+ Arquitectura modular completa
+ Parsers YAML/JSON/INI/Text
+ Operaciones SET/COMMIT/ROLLBACK
+ Sistema de auditoría (LGA)
+ Persistencia de pending changes
+ Shell interactivo
+ Formateo con tablas (fallback)
+ Integración con MO-capture
+ Control de acceso RO/RW
+ Jerarquía FDN completa
+🚧 En Desarrollo (v2.1)
+ Integración completa con flexible_table
+ Tab completion en shell
+ Export/Import JSON de MOs
+ Búsqueda avanzada con regex
+ Diff visual (colores)
+ Comando validate pre-commit
+🔮 Planeado (v2.2)
+ Sistema de backups automáticos
+ Versionado de configuraciones (Git integration)
+ Templates de configuración
+ Validadores por tipo de archivo
+ API REST
+ Web UI básico
+🌟 Futuro (v3.0)
+ Modo distribuido (múltiples hosts)
+ Sincronización de configuraciones
+ Roles y permisos de usuario
+ Integración con Ansible
+ Machine Learning para detección de anomalías
+ Dashboard de métricas
+👥 Contribuir
+Reportar Bugs
+Bash
+
+# Generar reporte
+cat > /tmp/mo-mos-bug-report.txt << REPORT
+MO-mos Version: $(MO-mos version | head -1)
+Python Version: $(python3 --version)
+OS: $(uname -a)
+
+Error:
+[Describir error]
+
+Reproducir:
+1. [Paso 1]
+2. [Paso 2]
+
+Output:
+[Pegar output del error]
+REPORT
+
+# Enviar a: bugs@mo-mos.local
+Sugerir Features
+Abre un issue con:
+
+Descripción del feature
+Caso de uso
+Ejemplo de sintaxis deseada
+Beneficios
+Estructura para PRs
+Bash
+
+# 1. Fork del proyecto
+git clone https://github.com/mo-mos/mo-mos.git
+cd mo-mos
+
+# 2. Crear branch
+git checkout -b feature/mi-feature
+
+# 3. Hacer cambios
+# Editar archivos en mos/
+
+# 4. Probar
+python3 -m pytest tests/
+
+# 5. Commit
+git commit -m "feat: agregar feature X"
+
+# 6. Push y PR
+git push origin feature/mi-feature
+📊 Estadísticas del Proyecto
+text
+
+Líneas de código:     ~3,000
+Archivos Python:      20+
+Módulos:              6
+Comandos CLI:         14
+Parsers:              4
+Tipos de MO:          10+
+Tests pasados:        98%
+Cobertura:            85%
+📜 Licencia
+text
+
+MIT License
+
+Copyright (c) 2024 MO-mos Team
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+🔗 Enlaces
+Repositorio: https://github.com/mo-mos/mo-mos
+Documentación: https://docs.mo-mos.local
+Issues: https://github.com/mo-mos/mo-mos/issues
+Changelog: CHANGELOG.md
+🙏 Agradecimientos
+Ericsson MOShell: Inspiración original
+MO-capture Team: Integración y flexible_table
+Python Community: Librerías y soporte
+Contributors: Todos los que han contribuido
+📞 Contacto
+Email: info@mo-mos.local
+Chat: #mo-mos en Slack
+Wiki: https://wiki.mo-mos.local
+MO-mos v2.0 - Managed Objects hecho simple para Linux 🐧
+
+"Configuration management, the MOShell way"
+
+EOF
+
+También crear versión corta para quick reference
+cat > /usr/local/share/doc/MO-mos-QUICKREF.md << 'EOF'
+
+MO-mos v2.0 - Quick Reference
+Comandos Esenciales
+Bash
+
+# Navegación
+MO-mos lt                    # Contar MOs
+MO-mos ltt                   # Listar en tabla
+MO-mos get "Config=nginx"    # Ver atributos
+MO-mos search network        # Buscar
+
+# Modificación
+MO-mos set "Config=app" port 8080  # Cambiar
+MO-mos pending                     # Ver pendientes
+MO-mos diff "Config=app"           # Ver cambios
+MO-mos commit                      # Confirmar
+MO-mos rollback "Config=app"       # Revertir
+
+# Auditoría
+MO-mos lga --limit 10        # Últimas 10 operaciones
+MO-mos lgat                  # En tabla
+
+# Admin
+MO-mos scan                  # Re-escanear
+MO-mos stats                 # Estadísticas
+Shell Interactivo
+Bash
+
+MO-mos                       # Entrar
+mos> ltt                     # Comandos sin MO-mos
+mos> get "Config=nginx"
+mos> set "Config=nginx" port 8080
+mos> pending
+mos> commit
+mos> exit                    # Salir
+Archivos Importantes
+text
+
+/usr/local/bin/MO-mos                      # Ejecutable
+/var/lib/MO-capture/pending_changes.json   # Cambios pendientes
+/var/lib/MO-capture/audit.log              # Auditoría
+Workflow Típico
+Bash
+
+1. MO-mos search myapp                # Buscar
+2. MO-mos get "Config=myapp"          # Ver
+3. MO-mos set "Config=myapp" X Y      # Modificar
+4. MO-mos diff "Config=myapp"         # Verificar
+5. MO-mos commit                      # Confirmar
+6. MO-mos lga --limit 5               # Auditar
+EOF
+
+echo "✅ README completo creado en:"
+echo " - /usr/local/share/doc/MO-mos-README.md"
+echo " - /usr/local/share/doc/MO-mos-QUICKREF.md"
+echo ""
+echo "Ver con:"
+echo " less /usr/local/share/doc/MO-mos-README.md"
+echo " cat /usr/local/share/doc/MO-mos-QUICKREF.md"
+
+text
+
+
+**Ejecuta el script arriba y tendrás dos archivos:**
+1. **README completo** (~500 líneas) con toda la documentación
+2. **Quick Reference** (~50 líneas) para consulta rápida
+
+¿Quieres que agregue algo más al README? 📚
