@@ -1,0 +1,39 @@
+# Configuración MO-capture - Devuan 13 LXC
+version: "1.0"
+system: "Devuan13-LXC"
+
+# Directorios a monitorear
+capture_directories:
+  - /usr/local
+  - /etc
+  - /opt
+  - /var/lib
+
+# Patrones a ignorar
+ignore_patterns:
+  - "*.log"
+  - "*.tmp"
+  - "*.cache"
+  - "/tmp/*"
+  - "/var/tmp/*"
+  - "/dev/*"
+
+# Comandos interceptados
+intercepted_commands:
+  - apt-get
+  - apt
+  - dpkg
+  - make
+  - pip
+  - pip3
+
+# Configuración de logging
+logging:
+  level: "INFO"
+  file: "/var/log/MO-capture.log"
+  max_size: "10MB"
+
+# Configuración de snapshots
+snapshots:
+  max_count: 50
+  auto_cleanup: true
