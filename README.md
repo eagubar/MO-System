@@ -928,4 +928,3 @@ text
 1. **README completo** (~500 líneas) con toda la documentación
 2. **Quick Reference** (~50 líneas) para consulta rápida
 
-¿Quieres que agregue algo más al README? 📚
